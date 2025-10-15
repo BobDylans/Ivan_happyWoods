@@ -1,0 +1,108 @@
+# Development Environment Configuration
+# This file overrides base configuration for local development
+
+# API Configuration - Development Settings
+api:
+  host: "127.0.0.1"
+  port: 8000
+  reload: true  # Enable auto-reload for development
+  workers: 1
+
+# LLM Configuration - Development Defaults
+llm:
+  provider: "openai"
+  # API key should be set via environment variable: VOICE_AGENT_LLM__API_KEY
+  api_key: "sk-M9DIQm5fQ66GgUtCXe9jw1MjjsPlNgSXF38gHQStYkIxan30"
+  base_url: "https://api.openai-proxy.org"
+  models:
+    default: "gpt-4"  # Updated to use gpt-4 as default
+    fast: "gpt-3.5-turbo"
+    creative: "gpt-4"
+  timeout: 30
+  max_tokens: 1024  # Reduced for faster responses
+  temperature: 0.7
+
+# Speech Configuration - Development Settings
+speech:
+  tts:
+    provider: "openai"
+    api_key: "sk-M9DIQm5fQ66GgUtCXe9jw1MjjsPlNgSXF38gHQStYkIxan30"
+    base_url: "https://api.openai-proxy.org"
+    voice: "alloy"
+    speed: 1.2  # Slightly faster for testing
+    format: "mp3"
+  stt:
+    provider: "openai"
+    api_key: "sk-M9DIQm5fQ66GgUtCXe9jw1MjjsPlNgSXF38gHQStYkIxan30"
+    base_url: "https://api.openai-proxy.org"
+    language: "en-US"
+    model: "whisper-1"
+
+# Tools Configuration - Limited set for development
+tools:
+  enabled:
+    - "search_tool"
+    - "calculator"
+    - "time_tool"
+  
+  search_tool:
+    enabled: true
+    # Set API key via environment: VOICE_AGENT_TOOLS__SEARCH_TOOL__API_KEY
+    timeout: 15
+    max_retries: 2
+  
+  calculator:
+    enabled: true
+    timeout: 5
+    max_retries: 1
+  
+  time_tool:
+    enabled: true
+    timeout: 2
+    max_retries: 1
+  
+  # Disabled by default in development to save costs
+  image_generator:
+    enabled: false
+  
+  document_analyzer:
+    enabled: false
+
+# Session Configuration - Development Settings
+session:
+  timeout_minutes: 15  # Shorter timeout for development
+  max_history: 20  # Reduced history for testing
+  cleanup_interval: 180  # More frequent cleanup
+  storage_type: "memory"
+  redis_url: null
+
+# Logging Configuration - Verbose for development
+logging:
+  level: "DEBUG"
+  format: "detailed"
+  file_path: "logs/voice-agent-dev.log"
+  max_file_size: "50MB"
+  backup_count: 3
+
+# Security Configuration - Relaxed for development
+security:
+  api_keys: 
+    - "dev-test-key-123"  # Default development API key
+  cors_origins: 
+    - "http://localhost:3000"
+    - "http://127.0.0.1:3000"
+    - "http://localhost:8080"
+  cors_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  rate_limit_per_minute: 120  # Higher limit for development
+
+# System Configuration
+environment: "development"
+version: "1.0.0-dev"
+debug: true
+
+# Development-specific settings
+dev_tools:
+  enable_hot_reload: true
+  auto_reload_config: true
+  mock_external_services: false  # Set to true to use mock services
+  log_all_requests: true

@@ -1,0 +1,110 @@
+# Production Environment Configuration
+# This file contains production-ready settings with security and performance optimizations
+
+# API Configuration - Production Settings
+api:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false
+  workers: 4  # Multiple workers for production
+
+# LLM Configuration - Production Settings
+llm:
+  provider: "openai"
+  # API key MUST be set via environment variable: VOICE_AGENT_LLM__API_KEY
+  api_key: ""  # Set via environment variable only
+  base_url: "https://api.openai.com/v1"
+  models:
+    default: "gpt-4"
+    fast: "gpt-3.5-turbo"
+    creative: "gpt-4"
+  timeout: 30
+  max_tokens: 2048
+  temperature: 0.7
+
+# Speech Configuration - Production Settings
+speech:
+  tts:
+    provider: "openai"
+    voice: "alloy"
+    speed: 1.0
+    format: "mp3"
+  stt:
+    provider: "openai"
+    language: "en-US"
+    model: "whisper-1"
+
+# Tools Configuration - Full feature set
+tools:
+  enabled:
+    - "search_tool"
+    - "calculator"
+    - "time_tool"
+    - "image_generator"
+    - "document_analyzer"
+  
+  search_tool:
+    enabled: true
+    # API key set via environment: VOICE_AGENT_TOOLS__SEARCH_TOOL__API_KEY
+    timeout: 10
+    max_retries: 3
+  
+  calculator:
+    enabled: true
+    timeout: 5
+    max_retries: 1
+  
+  time_tool:
+    enabled: true
+    timeout: 2
+    max_retries: 1
+  
+  image_generator:
+    enabled: true
+    # API key set via environment: VOICE_AGENT_TOOLS__IMAGE_GENERATOR__API_KEY
+    timeout: 60
+    max_retries: 2
+  
+  document_analyzer:
+    enabled: true
+    # API key set via environment: VOICE_AGENT_TOOLS__DOCUMENT_ANALYZER__API_KEY
+    timeout: 30
+    max_retries: 2
+
+# Session Configuration - Production Settings
+session:
+  timeout_minutes: 30
+  max_history: 50
+  cleanup_interval: 300
+  storage_type: "redis"  # Use Redis for production
+  # Redis URL set via environment: VOICE_AGENT_SESSION__REDIS_URL
+  redis_url: ""
+
+# Logging Configuration - Production Logging
+logging:
+  level: "INFO"
+  format: "json"  # Structured logging for production
+  file_path: "/var/log/voice-agent/app.log"
+  max_file_size: "100MB"
+  backup_count: 10
+
+# Security Configuration - Production Security
+security:
+  api_keys: []  # Set via environment variables only
+  cors_origins: 
+    - "https://yourdomain.com"
+    - "https://app.yourdomain.com"
+  cors_methods: ["GET", "POST", "OPTIONS"]
+  rate_limit_per_minute: 60
+
+# System Configuration
+environment: "production"
+version: "1.0.0"
+debug: false
+
+# Production-specific settings
+production:
+  enable_metrics: true
+  health_check_interval: 30
+  graceful_shutdown_timeout: 30
+  max_concurrent_sessions: 100

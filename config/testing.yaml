@@ -1,0 +1,95 @@
+# Testing Environment Configuration
+# This file contains settings optimized for automated testing
+
+# API Configuration - Testing Settings
+api:
+  host: "127.0.0.1"
+  port: 0  # Use random available port for testing
+  reload: false
+  workers: 1
+
+# LLM Configuration - Testing Settings
+llm:
+  provider: "openai"
+  api_key: "test-api-key-mock"  # Mock API key for testing
+  base_url: "http://localhost:8001/mock"  # Mock service endpoint
+  models:
+    default: "gpt-3.5-turbo"
+    fast: "gpt-3.5-turbo"
+    creative: "gpt-3.5-turbo"
+  timeout: 5  # Short timeout for tests
+  max_tokens: 100  # Minimal tokens for testing
+  temperature: 0.0  # Deterministic responses
+
+# Speech Configuration - Testing Settings
+speech:
+  tts:
+    provider: "openai"
+    voice: "alloy"
+    speed: 2.0  # Fast speech for testing
+    format: "mp3"
+  stt:
+    provider: "openai"
+    language: "en-US"
+    model: "whisper-1"
+
+# Tools Configuration - Minimal set for testing
+tools:
+  enabled:
+    - "calculator"
+    - "time_tool"
+  
+  search_tool:
+    enabled: false  # Disabled to avoid external API calls
+  
+  calculator:
+    enabled: true
+    timeout: 1
+    max_retries: 0  # No retries in tests
+  
+  time_tool:
+    enabled: true
+    timeout: 1
+    max_retries: 0
+  
+  image_generator:
+    enabled: false
+  
+  document_analyzer:
+    enabled: false
+
+# Session Configuration - Testing Settings
+session:
+  timeout_minutes: 1  # Very short timeout for tests
+  max_history: 5  # Minimal history
+  cleanup_interval: 10  # Frequent cleanup
+  storage_type: "memory"
+  redis_url: null
+
+# Logging Configuration - Minimal logging for tests
+logging:
+  level: "WARNING"  # Reduce log noise in tests
+  format: "standard"
+  file_path: null  # No file logging in tests
+  max_file_size: "1MB"
+  backup_count: 1
+
+# Security Configuration - Testing Security
+security:
+  api_keys: 
+    - "test-api-key"
+  cors_origins: ["*"]
+  cors_methods: ["GET", "POST", "OPTIONS"]
+  rate_limit_per_minute: 1000  # No rate limiting in tests
+
+# System Configuration
+environment: "testing"
+version: "1.0.0-test"
+debug: true
+
+# Testing-specific settings
+testing:
+  mock_external_services: true
+  use_real_audio: false
+  test_data_path: "tests/fixtures"
+  fast_mode: true

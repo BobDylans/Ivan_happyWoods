@@ -1,0 +1,94 @@
+# Base Configuration for Voice Agent System
+# This file contains default settings that apply to all environments
+
+# API Server Configuration
+api:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false
+  workers: 1
+
+# LLM Service Configuration (Required: Set api_key via environment or override)
+llm:
+  provider: "openai"
+  api_key: "your-api-key-here"  # Override with VOICE_AGENT_LLM__API_KEY
+  base_url: "https://api.openai.com/v1"
+  models:
+    default: "gpt-4"
+    fast: "gpt-3.5-turbo" 
+    creative: "gpt-4"
+  timeout: 30
+  max_tokens: 2048
+  temperature: 0.7
+
+# Speech Processing Configuration
+speech:
+  tts:
+    provider: "openai"
+    voice: "alloy"
+    speed: 1.0
+    format: "mp3"
+  stt:
+    provider: "openai"
+    language: "en-US"
+    model: "whisper-1"
+
+# MCP Tools Configuration
+tools:
+  enabled:
+    - "search_tool"
+    - "calculator"
+    - "time_tool"
+  
+  search_tool:
+    enabled: true
+    timeout: 10
+    max_retries: 3
+  
+  calculator:
+    enabled: true
+    timeout: 5
+    max_retries: 1
+  
+  time_tool:
+    enabled: true
+    timeout: 2
+    max_retries: 1
+  
+  image_generator:
+    enabled: false
+    timeout: 30
+    max_retries: 2
+  
+  document_analyzer:
+    enabled: false
+    timeout: 20
+    max_retries: 2
+
+# Session Management
+session:
+  timeout_minutes: 30
+  max_history: 50
+  cleanup_interval: 300
+  storage_type: "memory"  # memory or redis
+  redis_url: null
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "standard"  # standard, json, or detailed
+  file_path: null
+  max_file_size: "10MB"
+  backup_count: 5
+
+# Security Configuration
+security:
+  api_keys: []  # Add valid API keys here or use environment variables
+  cors_origins: ["*"]
+  cors_methods: ["GET", "POST", "OPTIONS"]
+  rate_limit_per_minute: 60
+
+# System Configuration
+environment: "base"
+version: "1.0.0"
+debug: false
