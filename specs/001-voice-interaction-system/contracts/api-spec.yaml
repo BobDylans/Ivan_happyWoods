@@ -1,0 +1,551 @@
+openapi: 3.0.3
+info:
+  title: Voice-Based AI Agent API
+  description: RESTful API for voice interaction with AI agent supporting real-time conversation and tool integration
+  version: 1.0.0
+  contact:
+    name: Ivan
+    
+servers:
+  - url: http://localhost:8000
+    description: Development server
+  - url: https://api.voice-agent.example.com
+    description: Production server
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  # Session Management
+  /api/sessions:
+    post:
+      summary: Create new conversation session
+      description: Initialize a new voice conversation session with user preferences
+      operationId: createSession
+      tags:
+        - Sessions
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '201':
+          description: Session created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/sessions/{sessionId}:
+    get:
+      summary: Get session details
+      description: Retrieve conversation session information and history
+      operationId: getSession
+      tags:
+        - Sessions
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session details retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionDetailResponse'
+        '404':
+          description: Session not found
+
+    delete:
+      summary: End conversation session
+      description: Terminate session and clean up resources
+      operationId: endSession
+      tags:
+        - Sessions
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Session ended successfully
+        '404':
+          description: Session not found
+
+  # Voice Interaction
+  /api/voice/upload:
+    post:
+      summary: Upload voice message
+      description: Submit audio for speech-to-text processing and agent response
+      operationId: uploadVoice
+      tags:
+        - Voice
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                audio:
+                  type: string
+                  format: binary
+                  description: Audio file (WAV, MP3, or M4A)
+                format:
+                  type: string
+                  enum: [wav, mp3, m4a]
+              required:
+                - session_id
+                - audio
+      responses:
+        '200':
+          description: Voice processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceResponse'
+        '400':
+          description: Invalid audio format or session
+        '413':
+          description: Audio file too large
+
+  /api/voice/synthesize:
+    post:
+      summary: Convert text to speech
+      description: Generate audio from text using configured TTS service
+      operationId: synthesizeVoice
+      tags:
+        - Voice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TTSRequest'
+      responses:
+        '200':
+          description: Audio generated successfully
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid text or voice parameters
+
+  # Text Chat (fallback)
+  /api/chat:
+    post:
+      summary: Send text message
+      description: Submit text message for agent processing (fallback when voice unavailable)
+      operationId: sendMessage
+      tags:
+        - Chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Message processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+        '400':
+          description: Invalid message or session
+
+  # Tool Management
+  /api/tools:
+    get:
+      summary: List available tools
+      description: Get catalog of tools available through MCP integration
+      operationId: listTools
+      tags:
+        - Tools
+      responses:
+        '200':
+          description: Tools list retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolsListResponse'
+
+  /api/tools/{toolName}/health:
+    get:
+      summary: Check tool health
+      description: Verify tool service availability and response time
+      operationId: checkToolHealth
+      tags:
+        - Tools
+      parameters:
+        - name: toolName
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tool is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+        '503':
+          description: Tool is unavailable
+
+  # WebSocket for real-time streaming
+  /api/stream:
+    get:
+      summary: WebSocket for real-time voice streaming
+      description: Establish WebSocket connection for bidirectional audio streaming
+      tags:
+        - Streaming
+      parameters:
+        - name: session_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '101':
+          description: WebSocket connection established
+        '400':
+          description: Invalid session ID
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    CreateSessionRequest:
+      type: object
+      properties:
+        user_id:
+          type: string
+          description: Optional user identifier
+        preferences:
+          $ref: '#/components/schemas/UserPreferences'
+      
+    UserPreferences:
+      type: object
+      properties:
+        preferred_voice:
+          type: string
+          enum: [alloy, echo, fable, onyx, nova, shimmer]
+          default: alloy
+        speech_rate:
+          type: number
+          minimum: 0.5
+          maximum: 2.0
+          default: 1.0
+        language:
+          type: string
+          default: en-US
+        interrupt_enabled:
+          type: boolean
+          default: true
+        context_length:
+          type: integer
+          minimum: 5
+          maximum: 50
+          default: 20
+
+    SessionResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ACTIVE, PAUSED, TERMINATED]
+        created_at:
+          type: string
+          format: date-time
+        websocket_url:
+          type: string
+          description: WebSocket endpoint for real-time streaming
+      required:
+        - session_id
+        - status
+        - created_at
+
+    SessionDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/SessionResponse'
+        - type: object
+          properties:
+            last_activity:
+              type: string
+              format: date-time
+            message_count:
+              type: integer
+            conversation_summary:
+              type: string
+            preferences:
+              $ref: '#/components/schemas/UserPreferences'
+
+    VoiceResponse:
+      type: object
+      properties:
+        message_id:
+          type: string
+          format: uuid
+        transcribed_text:
+          type: string
+          description: Speech-to-text result
+        agent_response:
+          type: string
+          description: AI agent text response
+        audio_url:
+          type: string
+          description: URL to download TTS audio
+        tool_calls:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolCallResult'
+        processing_time_ms:
+          type: integer
+          description: Total processing time
+      required:
+        - message_id
+        - agent_response
+
+    TTSRequest:
+      type: object
+      properties:
+        text:
+          type: string
+          maxLength: 4096
+        voice:
+          type: string
+          enum: [alloy, echo, fable, onyx, nova, shimmer]
+        speed:
+          type: number
+          minimum: 0.5
+          maximum: 2.0
+        format:
+          type: string
+          enum: [wav, mp3]
+          default: wav
+      required:
+        - text
+
+    ChatRequest:
+      type: object
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        message:
+          type: string
+          maxLength: 2048
+      required:
+        - session_id
+        - message
+
+    ChatResponse:
+      type: object
+      properties:
+        message_id:
+          type: string
+          format: uuid
+        response:
+          type: string
+        tool_calls:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolCallResult'
+        processing_time_ms:
+          type: integer
+      required:
+        - message_id
+        - response
+
+    ToolCallResult:
+      type: object
+      properties:
+        call_id:
+          type: string
+          format: uuid
+        tool_name:
+          type: string
+        function_name:
+          type: string
+        arguments:
+          type: object
+        result:
+          type: object
+        status:
+          type: string
+          enum: [COMPLETED, FAILED, TIMEOUT]
+        execution_time_ms:
+          type: integer
+      required:
+        - call_id
+        - tool_name
+        - function_name
+        - status
+
+    ToolsListResponse:
+      type: object
+      properties:
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolInfo'
+        total_count:
+          type: integer
+      required:
+        - tools
+        - total_count
+
+    ToolInfo:
+      type: object
+      properties:
+        tool_name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+          enum: [SEARCH, CALCULATION, AI_GENERATION, ANALYSIS, TIME]
+        status:
+          type: string
+          enum: [AVAILABLE, UNAVAILABLE, MAINTENANCE]
+        functions:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+              parameters:
+                type: object
+      required:
+        - tool_name
+        - description
+        - category
+        - status
+
+    HealthCheckResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        response_time_ms:
+          type: integer
+        last_check:
+          type: string
+          format: date-time
+        details:
+          type: object
+      required:
+        - status
+        - response_time_ms
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+          required:
+            - code
+            - message
+      required:
+        - error
+
+# WebSocket Message Schemas (for documentation)
+# These are not part of OpenAPI but document the WebSocket protocol
+
+# Client to Server Messages:
+# {
+#   "type": "audio_chunk",
+#   "session_id": "uuid",
+#   "data": "base64_encoded_audio",
+#   "format": "wav",
+#   "chunk_id": "uuid"
+# }
+#
+# {
+#   "type": "text_message", 
+#   "session_id": "uuid",
+#   "message": "text content"
+# }
+#
+# {
+#   "type": "interrupt",
+#   "session_id": "uuid"
+# }
+
+# Server to Client Messages:
+# {
+#   "type": "transcription",
+#   "session_id": "uuid", 
+#   "text": "transcribed speech",
+#   "confidence": 0.95
+# }
+#
+# {
+#   "type": "agent_response",
+#   "session_id": "uuid",
+#   "text": "agent response",
+#   "audio_data": "base64_encoded_audio",
+#   "tool_calls": []
+# }
+#
+# {
+#   "type": "error",
+#   "session_id": "uuid",
+#   "error": {
+#     "code": "error_code",
+#     "message": "error description"
+#   }
+# }
+#
+# {
+#   "type": "status",
+#   "session_id": "uuid",
+#   "status": "processing|ready|degraded",
+#   "services": {
+#     "tts": "available",
+#     "stt": "available", 
+#     "llm": "available",
+#     "tools": ["search", "calculator"]
+#   }
+# }

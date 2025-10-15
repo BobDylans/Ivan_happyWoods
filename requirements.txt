@@ -1,0 +1,75 @@
+# Ivan_happyWoods Voice Agent - Python Dependencies
+# Python 3.11+ Required
+# 更新日期: 2025-10-15
+
+# ============================================
+# 核心框架依赖 (Core Framework)
+# ============================================
+fastapi==0.116.1              # Web框架
+uvicorn[standard]==0.35.0     # ASGI服务器 (包含websockets支持)
+pydantic==2.11.7              # 数据验证
+pydantic-settings==2.11.0     # 配置管理
+
+# ============================================
+# LangGraph 和 AI 依赖 (LangGraph & AI)
+# ============================================
+langgraph==0.6.7              # 状态图框架
+langgraph-checkpoint==2.1.1   # 检查点支持
+langchain==0.3.27             # LangChain核心
+langchain-core==0.3.76        # LangChain核心组件
+langchain-openai==0.3.33      # OpenAI集成
+langchain-community==0.3.30   # 社区集成
+
+# ============================================
+# 网络和通信 (Networking)
+# ============================================
+httpx==0.28.1                 # 异步HTTP客户端
+httpx-sse==0.4.1              # Server-Sent Events支持
+websockets==15.0.1            # WebSocket支持 (语音实时通信)
+
+# ============================================
+# 配置和环境 (Configuration)
+# ============================================
+python-dotenv==1.1.0          # .env文件支持
+PyYAML==6.0.2                 # YAML配置文件
+typing-extensions==4.12.2     # 类型提示扩展
+
+# ============================================
+# 音频处理 (Audio Processing)
+# ============================================
+pydub>=0.25.1                 # 音频格式转换 (需要 ffmpeg)
+# 注意: pydub 依赖 ffmpeg，请确保已安装
+# Windows: https://www.gyan.dev/ffmpeg/builds/
+# Linux: apt-get install ffmpeg
+# macOS: brew install ffmpeg
+
+# ============================================
+# 开发和测试 (Development & Testing)
+# ============================================
+pytest>=7.4.0,<8.0.0          # 测试框架
+pytest-asyncio>=0.21.0,<0.22.0 # 异步测试支持
+pytest-mock>=3.12.0,<4.0.0    # Mock支持
+pytest-cov>=4.1.0,<5.0.0      # 代码覆盖率
+
+# ============================================
+# 代码质量工具 (Code Quality) - 可选
+# ============================================
+# black>=23.0.0,<24.0.0       # 代码格式化
+# ruff>=0.1.0,<0.2.0          # 代码检查
+# mypy>=1.7.0,<2.0.0          # 类型检查
+
+# ============================================
+# 类型提示 (Type Stubs) - 可选
+# ============================================
+# types-PyYAML>=6.0.0,<7.0.0
+
+# ============================================
+# 未来扩展 (Future Extensions)
+# ============================================
+# 以下依赖在当前版本中未使用，但可能在未来版本中需要：
+# aiofiles>=23.0.0,<24.0.0    # 异步文件操作
+# redis>=5.0.0,<6.0.0         # Session存储
+# librosa>=0.10.0,<0.11.0     # 音频处理
+# soundfile>=0.12.0,<0.13.0   # 音频文件读写
+# numpy>=1.24.0,<2.0.0        # 数值计算
+# langchain-anthropic>=0.1.0  # Anthropic集成

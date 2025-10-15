@@ -31,7 +31,23 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+Verify compliance with `.specify/memory/constitution.md` principles:
+
+- [ ] **Principle I: Test-Driven Development** - Tests written before implementation?
+- [ ] **Principle II: Documentation-First** - Architecture docs written before code?
+- [ ] **Principle III: Tool Usage Patterns** - Checked `demo/` directory for tool examples?
+- [ ] **Principle IV: API Layer Standards** - Middleware order and security headers correct?
+- [ ] **Principle V: Phase-Based Development** - Following Phase 0 → 1 → 2 → 3 sequence?
+- [ ] **Principle VI: Configuration Management** - Using environment variables for secrets?
+- [ ] **Principle VII: Observability** - Logging, metrics, tracing planned for Phase 3?
+
+**Additional Checks**:
+- [ ] No credentials in config files or code
+- [ ] Demo examples reviewed for all new tools/libraries
+- [ ] Performance standards defined (API response times, memory, concurrency)
+- [ ] Testing requirements specified (80% unit coverage, integration tests)
+
+**Violations** (if any, document in Complexity Tracking section below)
 
 ## Project Structure
 

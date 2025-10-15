@@ -1,0 +1,103 @@
+openapi: 3.1.0
+info:
+  title: Voice Agent Core (Partial)
+  version: 0.1.0
+paths:
+  /chat:
+    post:
+      summary: Chat (sync or streaming)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                session_id:
+                  type: string
+                stream:
+                  type: boolean
+                model_variant:
+                  type: string
+                  enum: [default, fast, creative]
+              required: [message]
+      responses:
+        '200':
+          description: Chat response (non-stream)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session_id:
+                    type: string
+                  content:
+                    type: string
+  /chat/stream:
+    post:
+      summary: Streaming chat via SSE (POST)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                session_id:
+                  type: string
+                model_variant:
+                  type: string
+                  enum: [default, fast, creative]
+              required: [message]
+      responses:
+        '200':
+          description: text/event-stream
+    get:
+      summary: Streaming chat via SSE (GET)
+      parameters:
+        - in: query
+          name: message
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: session_id
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: model_variant
+          required: false
+          schema:
+            type: string
+            enum: [default, fast, creative]
+      responses:
+        '200':
+          description: text/event-stream
+  /chat/ws:
+    get:
+      summary: WebSocket chat (upgrade)
+      description: >-
+        WebSocket messages: {"type":"chat","message":"..."} or {"type":"cancel"}.
+        Server events: start | delta | end | cancelled | error
+components:
+  schemas:
+    ChatEvent:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [start, delta, end, cancelled, error]
+        session_id:
+          type: string
+        content:
+          type: string
+        content_fragment:
+          type: string
+        model_variant:
+          type: string
+          enum: [default, fast, creative]
