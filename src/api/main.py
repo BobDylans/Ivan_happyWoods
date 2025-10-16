@@ -43,6 +43,15 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Voice Agent API service...")
     
+    # 🚀 优化1: 集中配置管理 - 一次性加载配置到app.state
+    try:
+        from config.settings import get_config
+        app.state.config = get_config()
+        logger.info("✅ Configuration loaded and cached in app.state")
+    except Exception as e:
+        logger.error(f"Failed to load configuration: {e}")
+        raise
+    
     # Initialize MCP tools
     try:
         from mcp.init_tools import initialize_default_tools

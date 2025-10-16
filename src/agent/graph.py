@@ -121,12 +121,37 @@ class VoiceAgent:
         
         workflow.add_edge("format_response", END)
         
-        # Compile graph
-        memory = MemorySaver()
-        graph = workflow.compile(checkpointer=memory)
+        # Compile workflow with checkpointer (memory or database)
+        checkpointer = self._get_checkpointer()
+        graph = workflow.compile(checkpointer=checkpointer)
         
         self.logger.debug("LangGraph 工作流编译成功")
         return graph
+    
+    def _get_checkpointer(self):
+        """
+        Get appropriate checkpointer based on configuration.
+        
+        Returns:
+            Checkpointer instance (MemorySaver or PostgreSQLCheckpointer)
+        """
+        # Check if database persistence is enabled
+        if hasattr(self.config, 'database') and self.config.database.enabled:
+            # Check if session storage is set to database
+            if self.config.session.storage_type == "database":
+                try:
+                    from database import PostgreSQLCheckpointer
+                    self.logger.info("Using PostgreSQL checkpointer for persistence")
+                    return PostgreSQLCheckpointer()
+                except Exception as e:
+                    self.logger.warning(
+                        f"Failed to initialize PostgreSQL checkpointer: {e}. "
+                        f"Falling back to memory."
+                    )
+        
+        # Default to memory saver
+        self.logger.info("Using in-memory checkpointer")
+        return MemorySaver()
     
     def _route_after_input(self, state: AgentState) -> str:
         """输入处理后的路由决策。"""

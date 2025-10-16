@@ -65,12 +65,24 @@ tools:
     timeout: 20
     max_retries: 2
 
+# Database Configuration
+database:
+  enabled: false  # Set to true to enable PostgreSQL persistence
+  type: "postgresql"
+  host: "localhost"
+  port: 5432
+  database: "voice_agent"
+  user: "agent_user"
+  password: "${POSTGRES_PASSWORD}"  # Override with environment variable
+  pool_size: 10
+  max_overflow: 20
+
 # Session Management
 session:
   timeout_minutes: 30
   max_history: 50
   cleanup_interval: 300
-  storage_type: "memory"  # memory or redis
+  storage_type: "memory"  # memory or database (requires database.enabled=true)
   redis_url: null
 
 # Logging Configuration

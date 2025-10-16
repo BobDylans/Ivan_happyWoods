@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: voice_agent_postgres
+    environment:
+      POSTGRES_DB: voice_agent
+      POSTGRES_USER: agent_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme123}
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent_user -d voice_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - voice_agent_network
+    restart: unless-stopped
+
+  # Qdrant Vector Database (for Phase 3B)
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: voice_agent_qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - voice_agent_network
+    restart: unless-stopped
+
+  # n8n Workflow Automation (for Phase 3C)
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: voice_agent_n8n
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD:-changeme123}
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - voice_agent_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  qdrant_data:
+    driver: local
+  n8n_data:
+    driver: local
+
+networks:
+  voice_agent_network:
+    driver: bridge
+

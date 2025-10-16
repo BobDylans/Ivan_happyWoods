@@ -13,6 +13,12 @@ from .tools import (
     WeatherTool,
     SearchTool,
 )
+from .voice_tools import (
+    VoiceSynthesisTool,
+    SpeechRecognitionTool,
+    VoiceAnalysisTool,
+    create_voice_tools,
+)
 
 __all__ = [
     "ToolRegistry",
@@ -26,4 +32,8 @@ __all__ = [
     "TimeTool",
     "WeatherTool",
     "SearchTool",
+    "VoiceSynthesisTool",
+    "SpeechRecognitionTool",
+    "VoiceAnalysisTool",
+    "create_voice_tools",
 ]

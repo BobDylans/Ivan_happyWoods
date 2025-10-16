@@ -1,0 +1,42 @@
+Generic single-database configuration with async support for Voice Agent database migrations.
+
+## Usage
+
+### Create a new migration
+```bash
+alembic revision --autogenerate -m "Description of changes"
+```
+
+### Apply migrations
+```bash
+# Upgrade to latest
+alembic upgrade head
+
+# Upgrade to specific revision
+alembic upgrade <revision_id>
+
+# Downgrade one revision
+alembic downgrade -1
+
+# Downgrade to specific revision
+alembic downgrade <revision_id>
+```
+
+### View migration history
+```bash
+# Current version
+alembic current
+
+# History
+alembic history
+
+# Show SQL for migration (don't execute)
+alembic upgrade head --sql
+```
+
+## Notes
+
+- Migrations are stored in `migrations/versions/`
+- The database URL is loaded from application config (config/base.yaml and .env)
+- Async SQLAlchemy is used for PostgreSQL operations
+

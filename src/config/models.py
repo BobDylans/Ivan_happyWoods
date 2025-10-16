@@ -149,12 +149,31 @@ class ToolsConfig(BaseModel):
     document_analyzer: ToolConfig = Field(default_factory=ToolConfig, description="Doc analysis config")
 
 
+class DatabaseConfig(BaseModel):
+    """Database configuration for PostgreSQL persistence."""
+    enabled: bool = Field(default=False, description="Enable database persistence")
+    type: str = Field(default="postgresql", description="Database type")
+    host: str = Field(default="localhost", description="Database host")
+    port: int = Field(default=5432, ge=1, le=65535, description="Database port")
+    database: str = Field(default="voice_agent", description="Database name")
+    user: str = Field(default="agent_user", description="Database user")
+    password: str = Field(default="changeme123", description="Database password")
+    pool_size: int = Field(default=10, ge=1, le=100, description="Connection pool size")
+    max_overflow: int = Field(default=20, ge=0, le=100, description="Max pool overflow")
+    
+    @validator("password")
+    def validate_password(cls, v):
+        if len(v) < 8:
+            raise ValueError("Database password must be at least 8 characters long")
+        return v
+
+
 class SessionConfig(BaseModel):
     """Session management configuration."""
     timeout_minutes: int = Field(default=30, ge=1, description="Session timeout in minutes")
     max_history: int = Field(default=50, ge=1, description="Maximum conversation history length")
     cleanup_interval: int = Field(default=300, ge=60, description="Cleanup interval in seconds")
-    storage_type: str = Field(default="memory", description="Session storage type (memory/redis)")
+    storage_type: str = Field(default="memory", description="Session storage type (memory/database/redis)")
     redis_url: Optional[str] = Field(default=None, description="Redis connection URL if using Redis")
 
 
@@ -183,6 +202,7 @@ class VoiceAgentConfig(BaseModel):
     llm: LLMConfig = Field(..., description="LLM service configuration")
     speech: SpeechConfig = Field(default_factory=SpeechConfig, description="Speech processing config")
     tools: ToolsConfig = Field(default_factory=ToolsConfig, description="MCP tools configuration")
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig, description="Database configuration")
     session: SessionConfig = Field(default_factory=SessionConfig, description="Session management config")
     
     # System configurations

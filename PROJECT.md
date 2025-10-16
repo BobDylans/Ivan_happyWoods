@@ -1,8 +1,10 @@
 # Ivan_HappyWoods - Voice-Based AI Agent Interaction System
 
-> **Project Status**: Phase 2 Complete (文本对话 + 语音集成 + 代码优化 ✅)  
-> **Last Updated**: 2025-10-15  
-> **Version**: 0.2.0-beta
+> **Project Status**: Phase 3A In Progress (数据库持久化 60% 完成 🚧)  
+> **Last Updated**: 2025-10-16  
+> **Version**: 0.3.0-alpha
+>
+> 📖 **新手？** 先阅读 [QUICK_START.md](QUICK_START.md) - 15分钟快速上手指南
 
 ---
 
@@ -56,9 +58,21 @@ Phase 2A (Voice Integration)     ███████████████�
 Phase 2B (Streaming TTS)         ████████████████████ 100% ✅
 Phase 2C (Conversation API)      ████████████████████ 100% ✅
 Phase 2D (Code Optimization)     ████████████████████ 100% ✅
-Phase 2E (MCP Tools)             ░░░░░░░░░░░░░░░░░░░░  0%  ⏳
-Phase 3 (Production Deployment)  ░░░░░░░░░░░░░░░░░░░░  0%  📋
+Phase 2E (MCP Voice Tools)       ████████████████████ 100% ✅
+Phase 3A (PostgreSQL Database)   ████████████░░░░░░░░  60% 🚧
+Phase 3B (RAG Knowledge Base)    ░░░░░░░░░░░░░░░░░░░░   0% 📋
+Phase 3C (n8n Integration)       ░░░░░░░░░░░░░░░░░░░░   0% 📋
 ```
+
+**Phase 3A Progress**:
+- ✅ Docker Compose + Database Schema
+- ✅ ORM Models + Repositories  
+- ✅ LangGraph Checkpointer
+- ⏳ API Integration
+- ⏳ Admin Endpoints
+- ⏳ Testing
+
+详见 [database-setup-guide.md](docs/database-setup-guide.md)
 
 ---
 

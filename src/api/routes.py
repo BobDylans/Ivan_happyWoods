@@ -706,9 +706,9 @@ async def list_tools():
     descriptions, and parameter schemas.
     """
     try:
-        from src.mcp import get_tool_registry
+        from .dependencies import get_tool_registry_cached
         
-        registry = get_tool_registry()
+        registry = get_tool_registry_cached()
         tools = registry.list_tools()
         
         tool_info = []
@@ -751,9 +751,9 @@ async def get_tool_schemas():
     Returns schemas that can be used with OpenAI's function calling API.
     """
     try:
-        from src.mcp import get_tool_registry
+        from .dependencies import get_tool_registry_cached
         
-        registry = get_tool_registry()
+        registry = get_tool_registry_cached()
         schemas = registry.get_schemas()
         
         return {
@@ -778,23 +778,41 @@ async def execute_tool(tool_name: str, parameters: Dict[str, Any]):
     
     This endpoint allows direct tool invocation for testing and debugging.
     In normal operation, tools are called automatically by the LLM.
+    
+    优化说明: 
+    - 简化响应体，移除冗余的success字段
+    - 成功时返回 data + metadata
+    - 失败时返回 error + error_code
     """
     try:
-        from src.mcp import get_tool_registry
+        from .dependencies import get_tool_registry_cached
         
-        registry = get_tool_registry()
+        registry = get_tool_registry_cached()
         result = await registry.execute(tool_name, **parameters)
         
-        return {
-            "success": True,
-            "tool": tool_name,
-            "result": result
-        }
+        # 🚀 优化3: 简化响应体结构
+        if result.get("success"):
+            # 成功: 只返回有用数据
+            response = {
+                "tool": tool_name,
+                "data": result.get("data", {}),
+            }
+            # 只在有metadata时才添加
+            if result.get("metadata"):
+                response["metadata"] = result["metadata"]
+            return response
+        else:
+            # 失败: 返回错误信息
+            return {
+                "tool": tool_name,
+                "error": result.get("error", "Execution failed"),
+                "error_code": "TOOL_EXECUTION_ERROR"
+            }
     
     except Exception as e:
         logger.error(f"Error executing tool {tool_name}: {e}")
         return {
-            "success": False,
             "tool": tool_name,
-            "error": str(e)
+            "error": str(e),
+            "error_code": "INTERNAL_ERROR"
         }

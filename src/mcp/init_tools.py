@@ -7,13 +7,14 @@ Initialize and register default tools for the agent system.
 import logging
 from typing import List
 
-from src.mcp import (
-    get_tool_registry,
+from .registry import get_tool_registry
+from .tools import (
     CalculatorTool,
     TimeTool,
     WeatherTool,
     SearchTool,
 )
+from .voice_tools import create_voice_tools
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def initialize_default_tools() -> List[str]:
         TimeTool(),
         WeatherTool(),
         SearchTool(),
-    ]
+    ] + create_voice_tools()
     
     registered_names = []
     
