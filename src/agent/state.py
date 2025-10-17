@@ -73,6 +73,7 @@ class AgentState(TypedDict):
     tool_calls: List[ToolCall]
     tool_results: List[ToolResult]
     pending_tool_calls: List[ToolCall]
+    tool_call_count: int  # 🆕 工具调用计数器，用于防止无限循环
     
     # Processing context
     current_intent: Optional[str]
@@ -181,6 +182,11 @@ def create_initial_state(
     """Create an initial agent state for a new conversation turn."""
     now = datetime.now()
     
+    # 🔧 修复: 从 model_config 中提取 max_tokens 和 temperature
+    model_cfg = model_config or {}
+    max_tokens_override = model_cfg.get("max_tokens")
+    temperature_override = model_cfg.get("temperature")
+    
     return AgentState(
         # Core conversation data
         messages=[],
@@ -197,6 +203,7 @@ def create_initial_state(
         tool_calls=[],
         tool_results=[],
         pending_tool_calls=[],
+        tool_call_count=0,  # 🆕 初始化为 0
         
         # Processing context
         current_intent=None,
@@ -208,9 +215,9 @@ def create_initial_state(
         error_state=None,
         
         # Configuration
-        model_config=model_config or {},
-        temperature=0.7,
-        max_tokens=1500,
+        model_config=model_cfg,
+        temperature=temperature_override if temperature_override is not None else 0.7,
+        max_tokens=max_tokens_override if max_tokens_override is not None else 8192,  # 🔧 优先使用传入的值
         
         # External history from session manager (initialized as None)
         external_history=None

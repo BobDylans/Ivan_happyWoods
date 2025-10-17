@@ -11,7 +11,7 @@ def prepare_llm_params(
     model: str,
     messages: list,
     temperature: float = 0.7,
-    max_tokens: int = 2048,
+    max_tokens: int = 16384,  # 🔧 修复默认值从 2048 提升到 16384
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -21,7 +21,7 @@ def prepare_llm_params(
         model: 模型名称
         messages: 对话消息列表
         temperature: 温度参数（某些模型不支持会被忽略）
-        max_tokens: 最大 token 数
+        max_tokens: 最大 token 数（默认 16384）
         **kwargs: 其他额外参数
     
     Returns:

@@ -74,7 +74,7 @@ class LLMConfig(BaseModel):
     base_url: str = Field(default="https://api.openai.com/v1", description="API base URL")
     models: LLMModels = Field(default_factory=LLMModels, description="Model configurations")
     timeout: int = Field(default=30, ge=1, description="Request timeout in seconds")
-    max_tokens: int = Field(default=2048, ge=1, description="Maximum tokens per response")
+    max_tokens: int = Field(default=8192, ge=1, description="Maximum tokens per response")  # 🆕 提升到 8192
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Response creativity")
     
     @validator("api_key")

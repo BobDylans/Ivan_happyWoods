@@ -20,7 +20,7 @@ try:
     from utils.llm_compat import prepare_llm_params
 except ImportError:
     # 如果导入失败，提供一个简单的兼容函数
-    def prepare_llm_params(model, messages, temperature=0.7, max_tokens=2048, **kwargs):
+    def prepare_llm_params(model, messages, temperature=0.7, max_tokens=16384, **kwargs):  # 🔧 修复默认值
         params = {
             "model": model,
             "messages": messages,
@@ -265,11 +265,14 @@ class AgentNodes:
     async def handle_tools(self, state: AgentState) -> AgentState:
         """处理工具调用请求
         
+        🆕 优化版: 支持多轮工具调用
+        
         当 LLM 需要使用工具时，此节点负责：
         1. 执行所有待处理的工具调用
         2. 收集工具执行结果
         3. 将结果添加到对话历史
-        4. 准备再次调用 LLM（让它处理工具结果）
+        4. 🆕 增加工具调用计数器
+        5. 准备再次调用 LLM（让它基于工具结果重新思考）
         
         Args:
             state: 当前对话状态
@@ -285,11 +288,19 @@ class AgentNodes:
                 state["next_action"] = "call_llm"
                 return state
             
+            # 🆕 增加工具调用计数
+            state["tool_call_count"] = state.get("tool_call_count", 0) + 1
+            current_iteration = state["tool_call_count"]
+            
+            self.logger.info(f"🔧 第 {current_iteration} 轮工具调用，待执行工具数: {len(state['pending_tool_calls'])}")
+            
             # 逐个执行工具调用
             for tool_call in state["pending_tool_calls"]:
                 result = await self._execute_tool_call(tool_call)
                 state["tool_results"].append(result)
                 state["tool_calls"].append(tool_call)
+                
+                self.logger.info(f"  ✅ 工具 '{tool_call.name}' 执行完成: {result.success}")
             
             # 清空待处理队列
             state["pending_tool_calls"] = []
@@ -304,17 +315,19 @@ class AgentNodes:
                 )
                 state["messages"].append(tool_message)
             
-            # 继续调用 LLM 处理工具结果
+            # 🆕 核心改动: 工具调用后返回 LLM 进行重新思考
+            # LLM 会基于工具结果判断是否需要更多工具或直接生成回复
             state["next_action"] = "call_llm"
             
-            self.logger.debug(f"已处理 {len(state['tool_calls'])} 个工具调用")
+            self.logger.info(f"🔄 第 {current_iteration} 轮工具调用完成，返回 LLM 重新评估")
             return state
             
         except Exception as e:
             self.logger.error(f"工具处理错误: {e}")
             state["error_state"] = f"tool_handling_error: {str(e)}"
             state["agent_response"] = "抱歉，在使用工具时遇到了问题，让我换个方式帮您。"
-            state["next_action"] = "format_response"
+            # 即使出错，也返回 LLM 让它生成 fallback 回复
+            state["next_action"] = "call_llm"
             return state
     
     async def format_response(self, state: AgentState) -> AgentState:
@@ -715,6 +728,21 @@ class AgentNodes:
                 tools=tools_schema if tools_schema else None  # 传递工具定义
             )
             
+            # 🔍 诊断日志 - LLM 请求参数
+            self.logger.info("=" * 60)
+            self.logger.info("📤 LLM API 请求参数:")
+            self.logger.info(f"  Model: {payload.get('model')}")
+            self.logger.info(f"  Max Tokens: {payload.get('max_tokens') or payload.get('max_completion_tokens')}")
+            self.logger.info(f"  Temperature: {payload.get('temperature', 'N/A (模型默认)')}")
+            self.logger.info(f"  Messages Count: {len(messages)}")
+            self.logger.info(f"  Tools Count: {len(tools_schema) if tools_schema else 0}")
+            
+            # 估算输入 token 数（粗略估计：中文 ~1.5 字符/token，英文 ~4 字符/token）
+            total_chars = sum(len(str(m.get('content', ''))) for m in messages)
+            estimated_input_tokens = int(total_chars / 2)  # 保守估计
+            self.logger.info(f"  估算输入 Tokens: ~{estimated_input_tokens}")
+            self.logger.info("=" * 60)
+            
             # 如果有工具，添加 tool_choice
             if tools_schema:
                 payload["tool_choice"] = "auto"  # 让模型自动决定是否调用工具
@@ -734,15 +762,48 @@ class AgentNodes:
                 raise RuntimeError(f"LLM HTTP {resp.status_code}: {error_text}")
             
             data = resp.json()
-            self.logger.debug(f"LLM 响应: {len(data.get('choices', []))} 个选择")
-
-            # 解析 OpenAI 风格的响应结构
+            
+            # 🔍 诊断日志 - LLM 响应信息
+            self.logger.info("=" * 60)
+            self.logger.info("📥 LLM API 响应:")
+            self.logger.info(f"  Choices Count: {len(data.get('choices', []))}")
+            
+            # 提取关键信息
             choices = data.get("choices", [])
             if choices:
                 first = choices[0]
+                finish_reason = first.get("finish_reason", "unknown")
                 message_obj = first.get("message", {})
                 content = message_obj.get("content") or ""
                 tool_calls_raw = message_obj.get("tool_calls") or []
+                
+                # ⚠️ 关键诊断点：finish_reason
+                self.logger.info(f"  ⭐ Finish Reason: {finish_reason}")
+                if finish_reason == "length":
+                    self.logger.warning("  ❌ 响应被截断！原因: max_tokens 限制")
+                    self.logger.warning("  💡 建议: 增加 max_tokens 或减少输入长度")
+                elif finish_reason == "stop":
+                    self.logger.info("  ✅ 响应完整（正常结束）")
+                elif finish_reason == "tool_calls":
+                    self.logger.info("  🔧 响应类型: 工具调用")
+                
+                self.logger.info(f"  Content Length: {len(content)} 字符")
+                self.logger.info(f"  Tool Calls Count: {len(tool_calls_raw)}")
+                
+                # 显示 usage 信息（如果有）
+                usage = data.get("usage", {})
+                if usage:
+                    self.logger.info(f"  Token Usage:")
+                    self.logger.info(f"    - Prompt Tokens: {usage.get('prompt_tokens', 'N/A')}")
+                    self.logger.info(f"    - Completion Tokens: {usage.get('completion_tokens', 'N/A')}")
+                    self.logger.info(f"    - Total Tokens: {usage.get('total_tokens', 'N/A')}")
+                
+                # 显示响应内容前 200 字符（用于验证）
+                if content:
+                    preview = content[:200] + ("..." if len(content) > 200 else "")
+                    self.logger.info(f"  Content Preview: {preview}")
+                
+                self.logger.info("=" * 60)
                 
                 # 规范化工具调用格式
                 tool_calls = []
@@ -887,6 +948,22 @@ class AgentNodes:
                 tools=tools_schema if tools_schema else None  # 传递工具定义
             )
             
+            # 🔍 诊断日志 - 流式请求参数
+            self.logger.info("=" * 60)
+            self.logger.info("📤 [STREAM] LLM API 请求参数:")
+            self.logger.info(f"  Model: {payload.get('model')}")
+            self.logger.info(f"  Max Tokens: {payload.get('max_tokens') or payload.get('max_completion_tokens')}")
+            self.logger.info(f"  Temperature: {payload.get('temperature', 'N/A')}")
+            self.logger.info(f"  Messages Count: {len(messages)}")
+            self.logger.info(f"  Tools Count: {len(tools_schema) if tools_schema else 0}")
+            self.logger.info(f"  Stream Mode: True")
+            
+            # 估算输入 token
+            total_chars = sum(len(str(m.get('content', ''))) for m in messages)
+            estimated_input_tokens = int(total_chars / 2)
+            self.logger.info(f"  估算输入 Tokens: ~{estimated_input_tokens}")
+            self.logger.info("=" * 60)
+            
             # 如果有工具，添加 tool_choice
             if tools_schema:
                 payload["tool_choice"] = "auto"
@@ -1029,7 +1106,28 @@ class AgentNodes:
                 return
             
             # 没有工具调用，正常结束
-            yield create_end_event(content=''.join(full_text), session_id=session_id)
+            final_content = ''.join(full_text)
+            
+            # 🔍 诊断日志 - 流式响应总结
+            self.logger.info("=" * 60)
+            self.logger.info("📥 [STREAM] LLM 流式响应总结:")
+            self.logger.info(f"  Total Content Length: {len(final_content)} 字符")
+            self.logger.info(f"  Delta Events Count: {len(full_text)}")
+            self.logger.info(f"  Tool Calls: {len(collected_tool_calls)}")
+            
+            # 显示内容前 200 字符
+            if final_content:
+                preview = final_content[:200] + ("..." if len(final_content) > 200 else "")
+                self.logger.info(f"  Content Preview: {preview}")
+            
+            # ⚠️ 注意：流式响应通常不返回 finish_reason
+            # 如果内容看起来被截断（突然结束），可能是 max_tokens 限制
+            if len(final_content) > 5000:
+                self.logger.warning("  ⚠️ 响应内容较长，如果看起来不完整，可能是 max_tokens 限制")
+            
+            self.logger.info("=" * 60)
+            
+            yield create_end_event(content=final_content, session_id=session_id)
             return
         except Exception as e:
             self.logger.warning(f"流式调用失败,回退到非流式: {e}")

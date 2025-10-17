@@ -27,7 +27,7 @@ from .nodes import AgentNodes
 try:
     from utils.llm_compat import prepare_llm_params
 except ImportError:
-    def prepare_llm_params(model, messages, temperature=0.7, max_tokens=2048, **kwargs):
+    def prepare_llm_params(model, messages, temperature=0.7, max_tokens=16384, **kwargs):  # 🔧 修复默认值
         params = {"model": model, "messages": messages}
         # GPT-5 系列不传 temperature，使用 API 默认值
         if not model.startswith("gpt-5"):
@@ -170,14 +170,31 @@ class VoiceAgent:
         return "error"
     
     def _route_after_llm(self, state: AgentState) -> str:
-        """LLM 调用后的路由决策。"""
+        """
+        LLM 调用后的路由决策。
+        
+        🆕 优化逻辑: 支持多轮工具调用
+        - 如果 LLM 返回工具调用 → 进入 handle_tools
+        - 否则 → 进入 format_response 生成最终回复
+        """
         if state.get("error_state"):
             self.logger.warning(f"LLM 调用出错: {state['error_state']}")
             return "error"
         
         next_action = state.get("next_action")
+        
+        # 检查是否需要调用工具
         if next_action == "handle_tools":
+            tool_call_count = state.get("tool_call_count", 0)
+            max_tool_iterations = 5  # 🆕 最大工具调用次数，防止无限循环
+            
+            if tool_call_count >= max_tool_iterations:
+                self.logger.warning(f"⚠️ 已达到最大工具调用次数 ({max_tool_iterations})，强制结束")
+                return "format_response"
+            
+            self.logger.info(f"🔧 第 {tool_call_count + 1} 轮工具调用")
             return "handle_tools"
+        
         elif next_action == "format_response":
             return "format_response"
         
@@ -185,19 +202,34 @@ class VoiceAgent:
         return "error"
     
     def _route_after_tools(self, state: AgentState) -> str:
-        """工具处理后的路由决策。"""
+        """
+        工具处理后的路由决策。
+        
+        🆕 核心优化: 工具调用后返回 LLM 进行重新思考
+        - 默认行为: 返回 call_llm，让 LLM 基于工具结果重新判断
+        - LLM 会决定: 是否需要更多工具，还是已经有足够信息生成回复
+        """
         if state.get("error_state"):
             self.logger.warning(f"工具处理出错: {state['error_state']}")
-            return "error"
+            # 即使工具失败，也返回 LLM 让它生成 fallback 回复
+            return "call_llm"
         
         next_action = state.get("next_action")
+        
+        # 🆕 关键改动: 工具调用后，始终返回 call_llm 进行重新思考
+        # LLM 会基于工具结果判断是否需要更多工具或直接生成回复
         if next_action == "call_llm":
+            self.logger.info("🔄 工具调用完成，返回 LLM 重新思考")
             return "call_llm"
+        
+        # 兜底: 如果节点强制指定 format_response（不太可能）
         elif next_action == "format_response":
+            self.logger.info("⚠️ 工具节点直接指定生成响应（罕见情况）")
             return "format_response"
         
-        self.logger.warning(f"工具处理后出现意外的 next_action: {next_action}")
-        return "error"
+        # 默认行为: 返回 LLM
+        self.logger.info("🔄 工具调用完成，默认返回 LLM")
+        return "call_llm"
     # 同步处理单条信息
     async def process_message(
         self,
