@@ -219,7 +219,13 @@ class AgentNodes:
             self.logger.debug(f"为会话 {state['session_id']} 调用 LLM")
             
             # 准备 LLM 消息（包含对话历史）
-            messages = self._prepare_llm_messages(state)
+            # 如果 state 中有 external_history，传递给 _prepare_llm_messages
+            external_history = state.get("external_history")
+            if external_history is not None:
+                self.logger.info(f"🔍 Found external_history in state: {len(external_history)} messages")
+            else:
+                self.logger.warning(f"⚠️ No external_history found in state for session {state['session_id']}")
+            messages = self._prepare_llm_messages(state, external_history=external_history)
             
             # 配置模型参数（使用兼容层处理不同模型的参数差异）
             model = state["model_config"].get("model", self.config.llm.models.default)
@@ -395,40 +401,286 @@ class AgentNodes:
         else:
             return "general_conversation"
     
-    def _prepare_llm_messages(self, state: AgentState) -> List[Dict[str, str]]:
+    def _prepare_llm_messages(self, state: AgentState, external_history: List[Dict] = None) -> List[Dict[str, str]]:
         """准备 LLM API 调用的消息列表
         
-        包含系统提示词和最近的对话历史（限制为最近 10 条消息以控制上下文长度）。
+        包含优化的系统提示词和历史对话。优先使用外部传入的历史记录。
         
         Args:
             state: 当前对话状态
+            external_history: 外部传入的历史消息列表 (可选)
         
         Returns:
             格式化的消息列表，符合 OpenAI API 格式
         """
         messages = []
         
-        # 添加系统提示词
+        # 构建优化的系统提示词
+        system_prompt = self._build_optimized_system_prompt(state)
         system_message = {
             "role": "system",
-            "content": (
-                "你是一个有帮助的语音助手。你可以使用工具来帮助用户完成各种任务。"
-                "当需要使用工具时，请返回包含工具调用详情的 JSON 对象。"
-            )
+            "content": system_prompt
         }
         messages.append(system_message)
         
-        # 添加最近的对话历史（保留最近 10 条消息）
-        MAX_HISTORY_MESSAGES = 10
-        recent_messages = state["messages"][-MAX_HISTORY_MESSAGES:]
-        for msg in recent_messages:
-            if msg.role in [MessageRole.USER, MessageRole.ASSISTANT]:
+        # 优先使用外部历史（从 SessionHistoryManager）
+        if external_history is not None:
+            # 限制历史消息数量（最近 10 条）
+            MAX_HISTORY_MESSAGES = 10
+            recent_history = external_history[-MAX_HISTORY_MESSAGES:] if external_history else []
+            for msg in recent_history:
                 messages.append({
-                    "role": msg.role.value,
-                    "content": msg.content
+                    "role": msg["role"],
+                    "content": msg["content"]
                 })
+            self.logger.info(f"✅ Loaded {len(recent_history)} messages from external history for LLM")
+            
+            # 重要：添加当前用户消息（来自 state["messages"] 的最后一条）
+            if state["messages"] and state["messages"][-1].role == MessageRole.USER:
+                current_user_msg = state["messages"][-1]
+                messages.append({
+                    "role": "user",
+                    "content": current_user_msg.content
+                })
+                self.logger.info(f"✅ Added current user message to LLM input")
+        else:
+            # 回退到 state 中的消息（如果有）
+            self.logger.info("⚠️ No external history provided, using state messages")
+            MAX_HISTORY_MESSAGES = 10
+            recent_messages = state["messages"][-MAX_HISTORY_MESSAGES:]
+            for msg in recent_messages:
+                if msg.role in [MessageRole.USER, MessageRole.ASSISTANT]:
+                    messages.append({
+                        "role": msg.role.value,
+                        "content": msg.content
+                    })
+            self.logger.info(f"📝 Using {len(recent_messages)} messages from state")
         
         return messages
+    
+    def _build_optimized_system_prompt(self, state: AgentState) -> str:
+        """构建优化的系统提示词，提升智能性和效率
+        
+        优化策略：
+        1. 明确角色定位和能力边界
+        2. 提供清晰的工具使用指南
+        3. 强调效率和准确性
+        4. 包含任务分解和推理框架
+        5. 根据上下文动态调整提示词
+        
+        Args:
+            state: 当前对话状态
+        
+        Returns:
+            优化后的系统提示词字符串
+        """
+        # 基础身份定义
+        base_identity = """# 角色定位
+你是一个高效、智能的多功能 AI 助手，具备以下核心能力：
+- 自然流畅的中英文对话
+- 智能工具调用和任务编排
+- 结构化问题分析和解决
+- 上下文理解和记忆保持
+
+# 核心原则
+1. **效率优先**: 用最少的步骤达成目标，避免冗余操作
+2. **准确至上**: 优先保证信息准确性，不确定时明确告知用户
+3. **主动思考**: 理解用户意图，必要时主动澄清需求
+4. **工具智用**: 合理判断何时需要工具，避免不必要的调用
+
+# 📝 回复格式规范（重要）
+**请务必使用 Markdown 格式组织你的回复，提升可读性：**
+
+1. **使用标题分层**: 用 `##` 或 `###` 标注段落主题
+2. **列表呈现要点**: 用 `-` 或 `1.` 列举信息
+3. **强调关键信息**: 用 `**粗体**` 突出重点
+4. **代码块**: 技术内容用 ` ```语言 ``` ` 包裹
+5. **引用来源**: 搜索结果用 `> 引用` 格式
+6. **链接格式**: 用 `[标题](URL)` 展示链接
+
+**示例回复格式**:
+```
+## 📊 搜索结果
+
+根据最新信息，以下是关于 [主题] 的要点：
+
+### 1. [第一个要点]
+- **关键信息**: xxx
+- **时间**: xxx
+- **来源**: [新闻标题](链接)
+
+### 2. [第二个要点]
+...
+
+---
+💡 **总结**: 简短总结关键信息
+```
+
+**对于搜索结果，特别注意**：
+- 用清晰的标题和序号组织
+- 每条新闻包含：标题、摘要、来源链接
+- 用分隔线 `---` 区分不同部分
+- 避免长段落，多用列表"""
+
+        # 获取可用工具列表
+        available_tools = self._format_available_tools()
+        
+        tools_guide = f"""
+
+# 可用工具
+{available_tools}
+
+# 工具使用策略
+**何时使用工具**:
+- 需要实时信息（天气、时间、搜索）时 → 必须使用工具
+- 需要复杂计算或数据处理时 → 使用计算器工具
+- 用户明确要求执行特定操作时 → 使用对应工具
+
+**何时不使用工具**:
+- 回答常识性问题或一般性对话 → 直接回答
+- 简单的心算或逻辑推理 → 直接回答
+- 需要创意或建议时 → 直接回答
+
+**工具调用原则**:
+1. 一次只调用真正需要的工具
+2. 优先使用最合适的单个工具，而非多个工具
+3. 工具调用后，基于结果给出清晰、有价值的回答"""
+
+        # 任务处理框架
+        task_framework = """
+
+# 任务处理框架
+对于复杂请求，遵循以下思维流程：
+1. **理解**: 准确识别用户真实需求和意图
+2. **规划**: 确定是否需要工具，需要哪些工具
+3. **执行**: 高效调用必要的工具获取信息
+4. **综合**: 整合工具结果，提供有价值的回答
+5. **验证**: 确保回答完整、准确地解决了用户问题
+
+# 响应质量标准
+✅ 优质回答应该：
+- 直接针对用户问题，避免啰嗦
+- 结构清晰（必要时使用列表、分点）
+- 信息准确，来源可靠
+- 语气友好、专业
+
+❌ 避免：
+- 过度冗长或重复的解释
+- 不必要的道歉或谦逊表达
+- 模糊不清的回答
+- 调用不相关的工具"""
+
+        # 上下文感知优化
+        context_optimization = self._build_context_aware_addition(state)
+        
+        # 组合完整提示词
+        full_prompt = base_identity + tools_guide + task_framework
+        
+        if context_optimization:
+            full_prompt += "\n\n" + context_optimization
+        
+        return full_prompt
+    
+    def _get_tools_schema(self) -> List[Dict]:
+        """获取工具的 OpenAI Function Calling 格式定义
+        
+        Returns:
+            工具定义列表，OpenAI tools 格式
+        """
+        try:
+            from mcp import get_tool_registry
+            registry = get_tool_registry()
+            tools = registry.list_tools()
+            
+            if not tools:
+                return []
+            
+            # 转换为 OpenAI Function Calling 格式
+            tools_schema = []
+            for tool in tools:
+                schema = tool.to_openai_schema()
+                tools_schema.append(schema)
+            
+            self.logger.info(f"✅ Loaded {len(tools_schema)} tools for LLM")
+            return tools_schema
+        except Exception as e:
+            self.logger.error(f"❌ Failed to load tools schema: {e}", exc_info=True)
+            return []
+    
+    def _format_available_tools(self) -> str:
+        """格式化可用工具列表为易读的文本
+        
+        Returns:
+            格式化的工具列表字符串
+        """
+        try:
+            from mcp import get_tool_registry
+            registry = get_tool_registry()
+            tools = registry.list_tools()
+            
+            if not tools:
+                return "当前暂无可用工具。"
+            
+            tool_descriptions = []
+            for tool in tools:
+                name = tool.name
+                desc = tool.description
+                # 简化描述，只保留关键信息
+                short_desc = desc.split('.')[0] if desc else "无描述"
+                tool_descriptions.append(f"- **{name}**: {short_desc}")
+            
+            return "\n".join(tool_descriptions)
+        
+        except Exception as e:
+            self.logger.warning(f"获取工具列表失败: {e}")
+            return "- **calculator**: 执行数学计算\n- **get_time**: 获取当前时间\n- **get_weather**: 查询天气信息\n- **web_search**: 搜索网络信息"
+    
+    def _build_context_aware_addition(self, state: AgentState) -> str:
+        """根据当前对话上下文构建额外的提示词增强
+        
+        Args:
+            state: 当前对话状态
+        
+        Returns:
+            上下文相关的额外提示词，如果不需要则返回空字符串
+        """
+        additions = []
+        
+        # 1. 如果有工具调用历史，提醒基于结果回答
+        if state.get("tool_calls") and len(state["tool_calls"]) > 0:
+            additions.append(
+                "# 当前状态\n"
+                "你刚刚调用了工具并获得了结果。请基于工具返回的实际数据回答用户，"
+                "不要编造或猜测信息。如果工具结果不完整，可以明确告知用户。"
+            )
+        
+        # 2. 如果对话轮次较多，提醒保持连贯性
+        message_count = len(state.get("messages", []))
+        if message_count > 6:
+            additions.append(
+                "# 对话连贯性\n"
+                "当前对话已进行多轮，请保持对话连贯性和上下文一致性。"
+                "如果用户提到'它'、'这个'等代词，请结合上下文理解所指对象。"
+            )
+        
+        # 3. 如果检测到特定意图，给出针对性指导
+        intent = state.get("current_intent")
+        if intent == "search":
+            additions.append(
+                "# 搜索任务优化\n"
+                "用户需要搜索信息。使用 web_search 工具后，请：\n"
+                "1. 总结关键信息，而非简单罗列结果\n"
+                "2. 如果有 AI 生成的摘要，优先使用\n"
+                "3. 提供 1-2 个最相关的链接供用户参考"
+            )
+        elif intent == "calculation":
+            additions.append(
+                "# 计算任务优化\n"
+                "用户需要进行计算。对于复杂表达式或多步计算，请使用 calculator 工具。\n"
+                "简单算术（如 2+2）可直接回答，但涉及小数、幂次、三角函数等应使用工具确保精度。"
+            )
+        
+        return "\n\n".join(additions) if additions else ""
     
     async def _make_llm_call(self, messages: List[Dict[str, str]], config: Dict[str, Any]) -> Dict[str, Any]:
         """调用 LLM API（OpenAI 兼容）
@@ -449,13 +701,26 @@ class AgentNodes:
             # 确保 HTTP 客户端已初始化
             await self._ensure_http_client()
 
+            # 获取工具定义（OpenAI 格式）
+            self.logger.info(f"🔍 Attempting to load tools schema...")
+            tools_schema = self._get_tools_schema()
+            self.logger.info(f"🔍 Tools schema loaded: {len(tools_schema) if tools_schema else 0} tools")
+            
             # 准备请求参数
             payload = prepare_llm_params(
                 model=config.get("model", self.config.llm.models.default),
                 messages=messages,
                 temperature=config.get("temperature", self.config.llm.temperature),
-                max_tokens=config.get("max_tokens", self.config.llm.max_tokens)
+                max_tokens=config.get("max_tokens", self.config.llm.max_tokens),
+                tools=tools_schema if tools_schema else None  # 传递工具定义
             )
+            
+            # 如果有工具，添加 tool_choice
+            if tools_schema:
+                payload["tool_choice"] = "auto"  # 让模型自动决定是否调用工具
+                self.logger.info(f"🔧 Added {len(tools_schema)} tools to LLM request")
+            else:
+                self.logger.warning(f"⚠️ No tools available for LLM request")
 
             # 构建完整 URL
             url = self._build_llm_url()
@@ -608,19 +873,37 @@ class AgentNodes:
             # 确保 HTTP 客户端已初始化
             await self._ensure_http_client()
 
+            # 获取工具定义（OpenAI 格式）
+            self.logger.info(f"🔍 [Stream] Loading tools schema for streaming mode...")
+            tools_schema = self._get_tools_schema()
+            self.logger.info(f"🔍 [Stream] Tools schema loaded: {len(tools_schema) if tools_schema else 0} tools")
+
             payload = prepare_llm_params(
                 model=config.get("model", self.config.llm.models.default),
                 messages=messages,
                 temperature=config.get("temperature", self.config.llm.temperature),
                 max_tokens=config.get("max_tokens", self.config.llm.max_tokens),
-                stream=True
+                stream=True,
+                tools=tools_schema if tools_schema else None  # 传递工具定义
             )
+            
+            # 如果有工具，添加 tool_choice
+            if tools_schema:
+                payload["tool_choice"] = "auto"
+                self.logger.info(f"🔧 [Stream] Added {len(tools_schema)} tools to streaming LLM request")
+            else:
+                self.logger.warning(f"⚠️ [Stream] No tools available for streaming LLM request")
+            
             # 使用提取的 URL 构建方法
             url = self._build_llm_url()
             
             self.logger.debug(f"LLM 流式调用目标: {url}")
             
             yield create_start_event(session_id=session_id, model=model)
+            
+            # 收集工具调用信息（流式返回时可能分散在多个 delta 中）
+            collected_tool_calls = []
+            
             async with self._http_client.stream('POST', url, json=payload) as resp:
                 if resp.status_code >= 400:
                     text = await resp.aread()
@@ -638,18 +921,114 @@ class AgentNodes:
                             continue
                         for choice in data_json.get('choices', []):
                             delta = choice.get('delta', {})
+                            
+                            # 处理文本内容
                             if 'content' in delta and delta['content']:
                                 piece = delta['content']
                                 full_text.append(piece)
                                 yield create_delta_event(content=piece, session_id=session_id)
-                            # 流式工具调用(OpenAI function calling 风格)
-                            if 'tool_calls' in delta and not yielded_tool_calls:
-                                # 在流结束后收集最终工具调用;这里可以转发部分名称
-                                try:
-                                    yield create_tool_calls_event(tool_calls=delta['tool_calls'], session_id=session_id)
-                                    yielded_tool_calls = True
-                                except Exception:
-                                    pass
+                            
+                            # 收集工具调用（OpenAI 流式格式）
+                            if 'tool_calls' in delta:
+                                for tc_delta in delta['tool_calls']:
+                                    idx = tc_delta.get('index', 0)
+                                    # 确保 list 足够长
+                                    while len(collected_tool_calls) <= idx:
+                                        collected_tool_calls.append({
+                                            'id': None,
+                                            'type': 'function',
+                                            'function': {'name': '', 'arguments': ''}
+                                        })
+                                    
+                                    # 累积 id
+                                    if 'id' in tc_delta:
+                                        collected_tool_calls[idx]['id'] = tc_delta['id']
+                                    
+                                    # 累积 function name
+                                    if 'function' in tc_delta:
+                                        fn = tc_delta['function']
+                                        if 'name' in fn:
+                                            collected_tool_calls[idx]['function']['name'] += fn['name']
+                                        if 'arguments' in fn:
+                                            collected_tool_calls[idx]['function']['arguments'] += fn['arguments']
+            
+            # 检查是否有工具调用
+            if collected_tool_calls:
+                self.logger.info(f"🔧 [Stream] Detected {len(collected_tool_calls)} tool call(s), executing...")
+                
+                # 通知前端工具调用开始
+                yield create_tool_calls_event(tool_calls=collected_tool_calls, session_id=session_id)
+                
+                # 执行所有工具
+                tool_results = []
+                for tc in collected_tool_calls:
+                    try:
+                        # 转换为 ToolCall 对象
+                        tool_call = ToolCall(
+                            id=tc.get('id') or f"tool_{int(datetime.now().timestamp())}",
+                            name=tc['function']['name'],
+                            arguments=json.loads(tc['function']['arguments']) if tc['function']['arguments'] else {}
+                        )
+                        
+                        # 执行工具
+                        result = await self._execute_tool_call(tool_call)
+                        
+                        # 格式化工具结果内容（使用 result 属性，不是 data）
+                        if result.success:
+                            # result.result 可能是 JSON 字符串或其他类型
+                            if isinstance(result.result, str):
+                                result_content = result.result
+                            elif isinstance(result.result, (dict, list)):
+                                result_content = json.dumps(result.result, ensure_ascii=False)
+                            else:
+                                result_content = str(result.result)
+                        else:
+                            result_content = f"Error: {result.error}"
+                        
+                        tool_results.append({
+                            'tool_call_id': tool_call.id,
+                            'role': 'tool',
+                            'name': tool_call.name,
+                            'content': result_content
+                        })
+                        
+                        self.logger.info(f"✅ [Stream] Tool '{tool_call.name}' executed successfully, result length: {len(result_content)}")
+                        
+                    except Exception as e:
+                        self.logger.error(f"❌ [Stream] Tool execution failed: {e}")
+                        tool_results.append({
+                            'tool_call_id': tc.get('id', 'unknown'),
+                            'role': 'tool',
+                            'name': tc['function']['name'],
+                            'content': f"Error: {str(e)}"
+                        })
+                
+                # 将工具结果添加到消息历史，再次调用 LLM（流式）
+                self.logger.info(f"🔄 [Stream] Calling LLM again with tool results...")
+                
+                # 构建新的消息列表
+                new_messages = messages + [
+                    {
+                        'role': 'assistant',
+                        'content': None,
+                        'tool_calls': collected_tool_calls
+                    }
+                ] + tool_results
+                
+                # 调试：打印消息结构
+                self.logger.info(f"📋 [Stream] Final message count: {len(new_messages)}")
+                self.logger.info(f"📋 [Stream] Last 3 messages roles: {[m.get('role', 'unknown') for m in new_messages[-3:]]}")
+                
+                # 递归调用自己，但不传递工具（避免无限循环）
+                config_no_tools = config.copy()
+                
+                # 重新调用（这次是流式返回工具处理后的结果）
+                async for event in self._stream_llm_with_tool_results(new_messages, config_no_tools, session_id):
+                    yield event
+                
+                return
+            
+            # 没有工具调用，正常结束
             yield create_end_event(content=''.join(full_text), session_id=session_id)
             return
         except Exception as e:
@@ -669,6 +1048,85 @@ class AgentNodes:
                     return
             else:
                 yield create_end_event(content=''.join(full_text), session_id=session_id)
+    
+    async def _stream_llm_with_tool_results(self, messages: List[Dict], config: Dict, session_id: Optional[str] = None):
+        """在工具调用后继续流式返回 LLM 的最终响应（不再传递工具）"""
+        self.logger.info(f"🎯 [Stream] Starting _stream_llm_with_tool_results with {len(messages)} messages")
+        
+        try:
+            from api.event_utils import create_delta_event, create_end_event, create_error_event
+        except ImportError:
+            from datetime import datetime
+            import uuid
+            def create_delta_event(content, sid=None):
+                evt = {"version": "1.0", "id": f"evt_{uuid.uuid4().hex[:16]}", 
+                       "timestamp": datetime.utcnow().isoformat() + "Z", "type": "delta", "content": content}
+                if sid: evt["session_id"] = sid
+                return evt
+            def create_end_event(content, sid=None, metadata=None):
+                evt = {"version": "1.0", "id": f"evt_{uuid.uuid4().hex[:16]}", 
+                       "timestamp": datetime.utcnow().isoformat() + "Z", "type": "end", "content": content}
+                if sid: evt["session_id"] = sid
+                if metadata: evt["metadata"] = metadata
+                return evt
+            def create_error_event(error, sid=None, error_code=None):
+                evt = {"version": "1.0", "id": f"evt_{uuid.uuid4().hex[:16]}", 
+                       "timestamp": datetime.utcnow().isoformat() + "Z", "type": "error", "error": error}
+                if sid: evt["session_id"] = sid
+                if error_code: evt["error_code"] = error_code
+                return evt
+        
+        try:
+            await self._ensure_http_client()
+            
+            # 不再传递工具，避免无限递归
+            payload = prepare_llm_params(
+                model=config.get("model", self.config.llm.models.default),
+                messages=messages,
+                temperature=config.get("temperature", self.config.llm.temperature),
+                max_tokens=config.get("max_tokens", self.config.llm.max_tokens),
+                stream=True
+                # tools=None  # 明确不传递工具
+            )
+            
+            url = self._build_llm_url()
+            full_response = []
+            
+            self.logger.info(f"🌐 [Stream] Calling LLM API for tool result processing...")
+            
+            async with self._http_client.stream('POST', url, json=payload) as resp:
+                if resp.status_code >= 400:
+                    text = await resp.aread()
+                    raise RuntimeError(f"流式 HTTP 请求失败 {resp.status_code}: {text[:200]}")
+                
+                async for line in resp.aiter_lines():
+                    if not line or not line.startswith('data:'):
+                        continue
+                    
+                    data_part = line[5:].strip()
+                    if data_part == '[DONE]':
+                        break
+                    
+                    try:
+                        data_json = json.loads(data_part)
+                    except json.JSONDecodeError:
+                        continue
+                    
+                    for choice in data_json.get('choices', []):
+                        delta = choice.get('delta', {})
+                        if 'content' in delta and delta['content']:
+                            piece = delta['content']
+                            full_response.append(piece)
+                            self.logger.debug(f"📤 [Stream] Yielding delta: {piece[:50]}...")
+                            yield create_delta_event(content=piece, session_id=session_id)
+            
+            final_content = ''.join(full_response)
+            self.logger.info(f"✅ [Stream] Tool result processing complete, total length: {len(final_content)}")
+            yield create_end_event(content=final_content, session_id=session_id)
+            
+        except Exception as e:
+            self.logger.error(f"工具结果流式调用失败: {e}")
+            yield create_error_event(error=str(e), session_id=session_id)
     
     def _has_tool_calls(self, response: Dict[str, Any]) -> bool:
         """Check if LLM response contains tool calls."""

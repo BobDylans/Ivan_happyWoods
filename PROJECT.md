@@ -1,8 +1,8 @@
 # Ivan_HappyWoods - Voice-Based AI Agent Interaction System
 
-> **Project Status**: Phase 3A In Progress (数据库持久化 60% 完成 🚧)  
-> **Last Updated**: 2025-10-16  
-> **Version**: 0.3.0-alpha
+> **Project Status**: Phase 2F Complete (完整功能对话系统 ✅)  
+> **Last Updated**: 2025-10-17  
+> **Version**: 0.2.6-stable
 >
 > 📖 **新手？** 先阅读 [QUICK_START.md](QUICK_START.md) - 15分钟快速上手指南
 
@@ -58,21 +58,21 @@ Phase 2A (Voice Integration)     ███████████████�
 Phase 2B (Streaming TTS)         ████████████████████ 100% ✅
 Phase 2C (Conversation API)      ████████████████████ 100% ✅
 Phase 2D (Code Optimization)     ████████████████████ 100% ✅
-Phase 2E (MCP Voice Tools)       ████████████████████ 100% ✅
-Phase 3A (PostgreSQL Database)   ████████████░░░░░░░░  60% 🚧
+Phase 2E (MCP Tools)             ████████████████████ 100% ✅
+Phase 2F (AI Features)           ████████████████████ 100% ✅
+Phase 3A (PostgreSQL Database)   ░░░░░░░░░░░░░░░░░░░░   0% 📋
 Phase 3B (RAG Knowledge Base)    ░░░░░░░░░░░░░░░░░░░░   0% 📋
 Phase 3C (n8n Integration)       ░░░░░░░░░░░░░░░░░░░░   0% 📋
 ```
 
-**Phase 3A Progress**:
-- ✅ Docker Compose + Database Schema
-- ✅ ORM Models + Repositories  
-- ✅ LangGraph Checkpointer
-- ⏳ API Integration
-- ⏳ Admin Endpoints
-- ⏳ Testing
-
-详见 [database-setup-guide.md](docs/database-setup-guide.md)
+**Phase 2F 完成内容** (2025-10-17):
+- ✅ 工具调用功能（7 个 MCP 工具）
+- ✅ 流式 + 工具调用集成
+- ✅ 上下文记忆（内存存储）
+- ✅ Markdown 渲染 + 代码高亮
+- ✅ 智能提示词优化
+- ✅ Tavily 搜索集成
+- ✅ 完整聊天界面 Demo
 
 ---
 
@@ -595,52 +595,88 @@ python test_conversation.py
 ### ✅ Phase 2D: 代码质量优化 (2025-10-15)
 
 - [x] 代码去重 (Extract Method 模式)
-  - HTTP 客户端初始化统一
-  - URL 构建逻辑提取
-  - 减少 ~35 行重复代码
-  
 - [x] 资源管理优化
-  - Async Context Manager 支持
-  - `cleanup()` 方法
-  - 防止内存泄漏
-  
 - [x] 中文本地化
-  - 22+ 个方法文档中文化
-  - 用户错误消息中文化
-  - 日志消息中文化
-  
 - [x] LLM 兼容性修复
-  - GPT-5 系列 temperature 参数处理
-  - 模型切换 (gpt-5-pro → gpt-5-mini)
-  - 兼容层完善
-
-**关键改进**:
-- 代码质量: 4.2/5 → 4.8/5
-- 重复代码: -50%
-- 中文覆盖率: +217%
 
 **文档**:
 - [CODE_OPTIMIZATION_COMPLETE.md](./docs/achievements/optimizations/CODE_OPTIMIZATION_COMPLETE.md) ⭐
-- [CODE_REVIEW_REPORT.md](./docs/achievements/optimizations/CODE_REVIEW_REPORT.md) ⭐
+
+### ✅ Phase 2E: MCP 工具集成 (2025-10-16)
+
+- [x] MCP 协议实现
+- [x] 工具注册和发现机制
+- [x] 基础工具集:
+  - [x] Web 搜索工具 (Tavily API)
+  - [x] 计算器
+  - [x] 时间/日期工具
+  - [x] 天气查询工具
+  - [x] 语音合成/识别工具
+- [x] 工具调用流程集成
+- [x] 错误处理和降级
+
+**关键文件**:
+- `src/mcp/base.py` - MCP 工具基类
+- `src/mcp/tools.py` - 7 个工具实现
+- `src/mcp/registry.py` - 工具注册表
+
+### ✅ Phase 2F: AI 功能完善 (2025-10-17)
+
+- [x] **工具调用完整实现**
+  - OpenAI Function Calling 格式支持
+  - 流式 + 非流式工具调用
+  - 工具结果智能整合
+  
+- [x] **上下文记忆功能**
+  - 内存会话历史管理
+  - 最多保留 20 条消息
+  - 24 小时 TTL 自动清理
+  
+- [x] **流式响应优化**
+  - SSE 实时推送
+  - 工具调用状态显示
+  - 打字机效果
+  
+- [x] **Markdown 渲染**
+  - AI 回复格式化
+  - 代码语法高亮
+  - 链接、列表美化
+  
+- [x] **提示词优化**
+  - 智能 Markdown 格式指引
+  - 信息来源标注规范
+  - 结构化输出模板
+
+**关键实现**:
+- `src/utils/session_manager.py` - 会话历史管理
+- `src/agent/nodes.py` - 工具调用 + 流式处理
+- `demo/chat_demo.html` - 完整聊天界面
+
+**测试验证**:
+```bash
+# 启动服务
+python start_server.py
+
+# 访问聊天界面
+# 浏览器打开: demo/chat_demo.html
+
+# 测试命令
+"搜索特朗普最新新闻"  # 测试工具调用
+"我叫小明"            # 测试上下文记忆
+"我叫什么名字？"      # 验证记忆功能
+```
 
 ---
 
 ## 进行中功能
 
-### ⏳ Phase 2E: MCP 工具集成 (规划中)
+### ⏳ Phase 3A: 数据库持久化 (规划中)
 
 **计划功能**:
-- [ ] MCP 协议实现
-- [ ] 工具注册和发现机制
-- [ ] 基础工具集:
-  - [ ] Web 搜索工具
-  - [ ] 计算器
-  - [ ] 时间/日期工具
-  - [ ] 代码执行器 (沙箱)
-- [ ] 工具调用流程集成
-- [ ] 错误处理和降级
-
-**设计文档**: 见 `specs/001-voice-interaction-system/tasks.md` (Task 2.x)
+- [ ] PostgreSQL 集成
+- [ ] 会话持久化存储
+- [ ] 工具调用记录
+- [ ] 用户管理系统
 
 ---
 
@@ -1048,6 +1084,151 @@ mypy src/
 
 ---
 
-*最后更新: 2025-10-15*  
+## 🎉 Phase 2F 重点功能详解
+
+### 1. 完整工具调用系统
+
+**实现亮点**:
+- ✅ 支持 7 个 MCP 工具（web_search, calculator, get_time, get_weather, 语音工具）
+- ✅ OpenAI Function Calling 标准格式
+- ✅ 流式 + 非流式双模式支持
+- ✅ 智能工具选择（LLM 自动判断）
+- ✅ 错误自动 fallback
+
+**使用示例**:
+```
+用户: "搜索特朗普最新新闻"
+  → LLM 检测到需要搜索工具
+  → 调用 web_search(query="特朗普 Donald Trump latest news")
+  → 返回 Tavily 搜索结果
+  → LLM 基于结果生成结构化回复
+```
+
+### 2. 上下文记忆系统
+
+**技术实现**:
+- 使用 `SessionHistoryManager` 进行内存存储
+- 每个会话最多保留 20 条消息（可配置）
+- 24 小时 TTL 自动清理过期会话
+- 使用 `deque` 高效管理历史长度
+
+**工作流程**:
+```
+API Layer: 从 SessionHistoryManager 获取历史
+    ↓
+Agent Layer: 将历史添加到 initial_state['external_history']
+    ↓
+Nodes Layer: _prepare_llm_messages 组装历史 + 当前消息
+    ↓
+LLM API: 带完整上下文的请求
+    ↓
+Response: 基于历史的智能回复
+    ↓
+API Layer: 保存新消息到 SessionHistoryManager
+```
+
+### 3. 流式响应 + 工具调用集成
+
+**创新实现**:
+- 流式模式下同样支持工具调用
+- 实时显示工具调用状态 ("🔧 正在调用工具: xxx")
+- 工具执行后继续流式输出最终答案
+- 无缝衔接，用户体验流畅
+
+**技术细节**:
+```python
+# 流式收集工具调用信息
+async for chunk in llm_stream:
+    if chunk.contains_tool_calls:
+        collected_tool_calls.append(chunk)
+
+# 执行工具
+results = await execute_tools(collected_tool_calls)
+
+# 带工具结果再次流式调用 LLM
+async for final_chunk in llm_stream_with_results:
+    yield final_chunk  # 继续流式输出
+```
+
+### 4. Markdown 渲染优化
+
+**双端实现**:
+
+**后端（系统提示词）**:
+```
+请务必使用 Markdown 格式组织回复：
+- 使用 ## 标题分层
+- 用列表呈现要点
+- 用 **粗体** 突出重点
+- 代码用 ```语言 ``` 包裹
+- 链接格式 [标题](URL)
+```
+
+**前端（marked.js + highlight.js）**:
+- 实时 Markdown 解析
+- 代码语法高亮
+- 响应式样式
+- 流式渲染支持
+
+**效果对比**:
+```
+优化前: 杂乱文本，难以阅读
+优化后: 层次分明，视觉优美，信息突出
+```
+
+### 5. 智能提示词系统
+
+**优化策略**:
+- 详细的角色定位和能力说明
+- 明确的任务处理流程
+- 工具使用指导和最佳实践
+- Markdown 格式规范
+- 信息来源标注要求
+
+**实际效果**:
+- AI 回复更加结构化
+- 搜索结果更易读
+- 信息来源清晰
+- 代码示例美观
+
+---
+
+## 🔥 核心技术亮点
+
+### 1. 流式工具调用架构
+首次实现了流式响应模式下的完整工具调用支持，解决了业界常见的"流式 vs 工具调用"二选一问题。
+
+### 2. 轻量级会话管理
+使用纯内存存储实现高性能会话历史，无需 Redis 等外部依赖，降低了系统复杂度。
+
+### 3. 双端 Markdown 协同
+后端提示词引导 + 前端实时渲染，打造了媲美 ChatGPT 的视觉体验。
+
+### 4. 智能工具选择
+LLM 根据用户意图自动判断是否需要工具，无需手动触发，提升了自然交互体验。
+
+---
+
+## 📱 快速体验
+
+```bash
+# 1. 启动服务器
+python start_server.py
+
+# 2. 浏览器打开聊天界面
+# 方式一: 直接双击 demo/chat_demo.html
+# 方式二: 访问 http://127.0.0.1:8000 (如已配置静态文件服务)
+
+# 3. 测试场景
+"搜索特朗普最新新闻"     # 工具调用
+"我叫小明，今年25岁"     # 上下文记忆
+"我叫什么名字？多大？"   # 验证记忆
+"计算 1234 × 5678"      # 计算工具
+"现在几点了？"          # 时间工具
+```
+
+---
+
+*最后更新: 2025-10-17*  
 *维护者: Ivan_HappyWoods Development Team*  
 *License: [待定]*

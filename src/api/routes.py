@@ -82,8 +82,9 @@ tools_router = APIRouter(prefix="/tools", tags=["Tools"])
 
 @chat_router.post("/", response_model=ChatResponse)
 async def chat_message(
-    request: ChatRequest,
+    chat_request: ChatRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
     agent = Depends(get_voice_agent)
 ):
     """
@@ -96,10 +97,19 @@ async def chat_message(
     
     try:
         # Generate session ID if not provided
-        session_id = request.session_id or f"session_{uuid.uuid4().hex[:12]}"
+        session_id = chat_request.session_id or f"session_{uuid.uuid4().hex[:12]}"
+        logger.info(f"🎯 Processing chat request for session: {session_id}")
         
         # Create message ID
         message_id = f"msg_{uuid.uuid4().hex[:8]}_{int(time.time())}"
+        
+        # 获取会话历史管理器
+        session_manager = None
+        if hasattr(request.app.state, 'session_manager'):
+            session_manager = request.app.state.session_manager
+            logger.info(f"✅ Session manager found for session {session_id}")
+        else:
+            logger.error("❌ Session manager NOT found in app.state!")
         
         if agent is None:
             # Fallback response when agent is not available
@@ -114,11 +124,19 @@ async def chat_message(
             )
         
         # Decide streaming
-        effective_model_cfg = request.model_params or request.model_config_override
-        if request.stream:
+        effective_model_cfg = chat_request.model_params or chat_request.model_config_override
+        logger.info(f"🔀 Stream mode: {chat_request.stream}")
+        if chat_request.stream:
+            # 流式模式：获取历史并在流式结束后保存
             async def event_generator():
                 try:
-                    variant = request.model_variant
+                    # 获取历史消息（不包含当前消息）
+                    history = []
+                    if session_manager is not None:
+                        history = session_manager.get_history(session_id)
+                        logger.info(f"📚 [Stream] Retrieved {len(history)} messages for session {session_id}")
+                    
+                    variant = chat_request.model_variant
                     effective_cfg = effective_model_cfg
                     if variant and not effective_cfg:
                         if variant == 'fast':
@@ -127,30 +145,63 @@ async def chat_message(
                             effective_cfg = {"model": agent.config.llm.models.creative}
                         else:
                             effective_cfg = {"model": agent.config.llm.models.default}
+                    
                     collected = []
                     async for event in agent.process_message_stream(
-                        user_input=request.message,
+                        user_input=chat_request.message,
                         session_id=session_id,
-                        user_id=request.user_id,
-                        model_config=effective_cfg
+                        user_id=chat_request.user_id,
+                        model_config=effective_cfg,
+                        external_history=history  # 传递历史到流式处理
                     ):
                         if event.get('type') == 'delta' and event.get('content'):
                             collected.append(event['content'])
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                         if event.get('type') == 'end':
-                            # 写入历史（简单调用一次普通处理以复用格式化逻辑）
-                            # 这里可以改为直接写入，但为简化暂时重用 process_message
+                            # 流式结束，保存用户消息和 AI 回复到历史
+                            if session_manager is not None:
+                                full_response = ''.join(collected)
+                                session_manager.add_message(session_id, "user", chat_request.message)
+                                session_manager.add_message(session_id, "assistant", full_response)
+                                logger.info(f"💾 [Stream] Saved conversation to history for session {session_id}")
                             break
                 except Exception as e:
+                    logger.error(f"Error in stream: {e}")
                     yield f"data: {json.dumps({'type':'error','error':str(e)}, ensure_ascii=False)}\n\n"
             return StreamingResponse(event_generator(), media_type="text/event-stream")
         else:
+            logger.info(f"📝 Non-streaming mode, processing with history")
+            # 获取历史消息（不包含当前消息）
+            history = []
+            logger.info(f"🔍 session_manager exists: {session_manager is not None}")
+            if session_manager is not None:  # 使用 is not None 而不是 if session_manager
+                history = session_manager.get_history(session_id)
+                logger.info(f"📚 Retrieved {len(history)} messages from history for session {session_id}")
+            else:
+                logger.error(f"❌ session_manager is None!")
+            
+            # 调用 agent 处理消息，传递历史
+            logger.info(f"🤖 Calling agent.process_message with {len(history)} history messages")
             result = await agent.process_message(
-                user_input=request.message,
+                user_input=chat_request.message,
                 session_id=session_id,
-                user_id=request.user_id,
-                model_config=effective_model_cfg
+                user_id=chat_request.user_id,
+                model_config=effective_model_cfg,
+                external_history=history
             )
+            logger.info(f"✅ Agent returned result type: {type(result)}, keys: {result.keys() if isinstance(result, dict) else 'N/A'}")
+            
+            # 将这一轮的用户消息和 AI 回复都添加到历史
+            logger.info(f"💾 About to save messages. session_manager: {session_manager is not None}")
+            if session_manager is not None:  # 使用 is not None
+                session_manager.add_message(session_id, "user", chat_request.message)
+                logger.info(f"💾 Saved user message to history for session {session_id}")
+                
+                if isinstance(result, dict):
+                    ai_response = result.get("response", "")
+                    if ai_response:
+                        session_manager.add_message(session_id, "assistant", ai_response)
+                        logger.info(f"💾 Saved assistant response to history for session {session_id}")
         
         # Calculate processing time
         processing_time = (time.time() - start_time) * 1000
@@ -158,7 +209,7 @@ async def chat_message(
         # Update session store
         _session_store[session_id] = {
             "session_id": session_id,
-            "user_id": request.user_id,
+            "user_id": chat_request.user_id,
             "last_activity": datetime.now(),
             "message_count": _session_store.get(session_id, {}).get("message_count", 0) + 1
         }
@@ -184,7 +235,7 @@ async def chat_message(
         return ChatResponse(
             success=False,
             response="I apologize, but I encountered an error processing your message.",
-            session_id=request.session_id or f"session_{uuid.uuid4().hex[:12]}",
+            session_id=chat_request.session_id or f"session_{uuid.uuid4().hex[:12]}",
             message_id=f"msg_{uuid.uuid4().hex[:8]}_{int(time.time())}",
             timestamp=datetime.now(),
             processing_time_ms=processing_time,

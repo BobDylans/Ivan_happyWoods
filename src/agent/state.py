@@ -87,6 +87,9 @@ class AgentState(TypedDict):
     model_config: Dict[str, Any]
     temperature: float
     max_tokens: int
+    
+    # External history from session manager (optional)
+    external_history: Optional[List[Dict[str, str]]]
 
 
 class ConversationContext(BaseModel):
@@ -207,7 +210,10 @@ def create_initial_state(
         # Configuration
         model_config=model_config or {},
         temperature=0.7,
-        max_tokens=1500
+        max_tokens=1500,
+        
+        # External history from session manager (initialized as None)
+        external_history=None
     )
 
 

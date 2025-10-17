@@ -49,7 +49,8 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             "/docs",
             "/openapi.json",
             "/redoc",
-            "/favicon.ico"
+            "/favicon.ico",
+            "/api/v1/health"  # Health check 不需要认证
         ]
         
         if self.enabled:
@@ -68,6 +69,10 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         
         # Skip if auth disabled
         if not self.enabled:
+            return await call_next(request)
+        
+        # Skip OPTIONS requests (CORS preflight)
+        if request.method == "OPTIONS":
             return await call_next(request)
         
         # Check if path is exempt

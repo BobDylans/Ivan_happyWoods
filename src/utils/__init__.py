@@ -1,21 +1,7 @@
 """
-Utils Package
-
-工具函数和辅助模块
+Utility modules for the Voice Agent API.
 """
 
-from .llm_compat import (
-    prepare_llm_params,
-    is_gpt5_model,
-    get_max_tokens_param_name,
-    get_model_features,
-    validate_model_params,
-)
+from .session_manager import SessionHistoryManager
 
-__all__ = [
-    "prepare_llm_params",
-    "is_gpt5_model",
-    "get_max_tokens_param_name",
-    "get_model_features",
-    "validate_model_params",
-]
+__all__ = ["SessionHistoryManager"]

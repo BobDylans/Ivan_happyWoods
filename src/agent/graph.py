@@ -204,7 +204,8 @@ class VoiceAgent:
         user_input: str,
         session_id: str,
         user_id: Optional[str] = None,
-        model_config: Optional[Dict[str, Any]] = None
+        model_config: Optional[Dict[str, Any]] = None,
+        external_history: Optional[List[Dict]] = None
     ) -> Dict[str, Any]:
         """
         处理用户消息并返回代理的响应。
@@ -214,6 +215,7 @@ class VoiceAgent:
             session_id: 唯一会话标识符
             user_id: 可选的用户标识符
             model_config: 可选的模型配置覆盖
+            external_history: 可选的外部历史消息列表
             
         Returns:
             包含代理响应和元数据的字典
@@ -228,6 +230,13 @@ class VoiceAgent:
                 user_id=user_id,
                 model_config=model_config or {}
             )
+            
+            # 如果有外部历史，添加到 state（即使是空列表也要添加）
+            if external_history is not None:
+                initial_state["external_history"] = external_history
+                self.logger.info(f"🔄 Added {len(external_history)} messages to initial_state['external_history']")
+            else:
+                self.logger.warning(f"⚠️ No external_history provided to process_message (None)")
             
             # Configure thread for session persistence
             thread_config = {"configurable": {"thread_id": session_id}}
@@ -325,7 +334,8 @@ class VoiceAgent:
         user_input: str,
         session_id: str,
         user_id: Optional[str] = None,
-        model_config: Optional[Dict[str, Any]] = None
+        model_config: Optional[Dict[str, Any]] = None,
+        external_history: Optional[List[Dict]] = None  # 新增：外部历史参数
     ):
         """流式处理用户消息,作为异步生成器产生事件。
 
@@ -340,6 +350,13 @@ class VoiceAgent:
             model_config=model_config or {}
         )
         
+        # 添加外部历史到 state
+        if external_history is not None:
+            initial_state["external_history"] = external_history
+            self.logger.info(f"🔄 [Stream] Added {len(external_history)} messages to initial_state['external_history']")
+        else:
+            self.logger.warning(f"⚠️ [Stream] No external_history provided to process_message_stream")
+        
         accumulated_content = []  # 收集 delta 片段用于最终持久化
         
         try:
@@ -350,7 +367,8 @@ class VoiceAgent:
                 return
             
             # 步骤 2: 流式 LLM 并累积内容
-            messages = self.nodes._prepare_llm_messages(state)
+            external_history_for_llm = state.get("external_history")
+            messages = self.nodes._prepare_llm_messages(state, external_history=external_history_for_llm)
             model = state["model_config"].get("model", self.config.llm.models.default)
             llm_config = prepare_llm_params(
                 model=model,

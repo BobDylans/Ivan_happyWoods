@@ -42,12 +42,20 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup
     logger.info("Starting Voice Agent API service...")
-    
+    # 重点是将MCP工具，agent等一系列功能一起初始化
     # 🚀 优化1: 集中配置管理 - 一次性加载配置到app.state
     try:
+        import os
         from config.settings import get_config
         app.state.config = get_config()
         logger.info("✅ Configuration loaded and cached in app.state")
+        
+        # 设置 API Keys 到环境变量（如果配置中有）
+        if hasattr(app.state.config, 'security') and hasattr(app.state.config.security, 'api_keys'):
+            api_keys = app.state.config.security.api_keys
+            if api_keys:
+                os.environ['API_KEYS'] = ','.join(api_keys)
+                logger.info(f"✅ API keys loaded from config: {len(api_keys)} key(s)")
     except Exception as e:
         logger.error(f"Failed to load configuration: {e}")
         raise
@@ -92,6 +100,15 @@ async def lifespan(app: FastAPI):
             logger.info("API will run in degraded mode without agent functionality")
     except ImportError:
         logger.warning("Agent modules not available - running in mock mode")
+    
+    # Initialize session history manager
+    try:
+        from utils.session_manager import SessionHistoryManager
+        app.state.session_manager = SessionHistoryManager(max_history=20, ttl_hours=24)
+        logger.info("Session history manager initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize session manager: {e}")
+        raise
     
     logger.info("Voice Agent API service started successfully")
     
@@ -150,16 +167,11 @@ app = FastAPI(
 # 实现了跨域
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:8080", 
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:8080",
-        # Add production domains here
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_origins=["*"],  # 允许所有来源（包括 file:// 协议）
+    allow_credentials=False,  # 设为 False 以允许 *
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 

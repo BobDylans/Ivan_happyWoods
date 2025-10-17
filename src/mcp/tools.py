@@ -222,11 +222,13 @@ class WeatherTool(Tool):
 
 class SearchTool(Tool):
     """
-    Web search tool (mock implementation).
+    Web search tool using Tavily API.
     
-    In production, this would connect to a search API (Google, Bing, DuckDuckGo).
-    Currently returns mock search results.
+    Tavily provides AI-optimized search results with high quality content.
     """
+    
+    # Hardcoded API key (TODO: Move to environment variables)
+    TAVILY_API_KEY = "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"
     
     @property
     def name(self) -> str:
@@ -234,7 +236,7 @@ class SearchTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Search the web for information. Returns relevant search results with titles and snippets."
+        return "Search the web for information using Tavily API. Returns relevant search results with titles, snippets, and URLs."
     
     @property
     def parameters(self):
@@ -255,38 +257,76 @@ class SearchTool(Tool):
         ]
     
     async def execute(self, query: str, num_results: int = 5, **kwargs) -> ToolResult:
-        """Perform web search."""
+        """Perform web search using Tavily API."""
         try:
+            import httpx
+            
             # Limit results
             num_results = max(1, min(num_results, 10))
             
-            # Simulate API call delay
-            await asyncio.sleep(0.2)
+            # Tavily API endpoint
+            url = "https://api.tavily.com/search"
             
-            # Mock search results
-            mock_results = [
-                {
-                    "title": f"Result {i+1} for '{query}'",
-                    "snippet": f"This is a mock search result snippet for query: {query}. "
-                               f"In production, this would return real search results.",
-                    "url": f"https://example.com/result{i+1}",
-                    "rank": i + 1
-                }
-                for i in range(num_results)
-            ]
+            # Prepare request payload
+            payload = {
+                "api_key": self.TAVILY_API_KEY,
+                "query": query,
+                "max_results": num_results,
+                "search_depth": "basic",  # or "advanced" for deeper search
+                "include_answer": True,   # Get AI-generated answer
+                "include_raw_content": False,
+                "include_images": False
+            }
+            
+            # Make async HTTP request
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+            
+            # Extract results
+            results = []
+            for i, result in enumerate(data.get("results", []), 1):
+                results.append({
+                    "title": result.get("title", "No title"),
+                    "snippet": result.get("content", "No content available"),
+                    "url": result.get("url", ""),
+                    "score": result.get("score", 0),
+                    "rank": i
+                })
+            
+            # Get AI-generated answer if available
+            ai_answer = data.get("answer", "")
             
             return ToolResult(
                 success=True,
                 data={
                     "query": query,
-                    "results": mock_results,
-                    "total_results": num_results
+                    "results": results,
+                    "total_results": len(results),
+                    "ai_answer": ai_answer  # AI-generated summary answer
                 },
                 metadata={
-                    "source": "mock",
-                    "note": "These are simulated results. Connect to real search API for production.",
-                    "search_time_ms": 200
+                    "source": "tavily",
+                    "search_depth": "basic",
+                    "response_time": data.get("response_time", 0)
                 }
+            )
+        
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Tavily API HTTP error: {e.response.status_code} - {e.response.text}")
+            return ToolResult(
+                success=False,
+                error=f"Search API error: {e.response.status_code}",
+                metadata={"query": query, "error_detail": str(e)}
+            )
+        
+        except httpx.TimeoutException:
+            logger.error(f"Tavily API timeout for query: {query}")
+            return ToolResult(
+                success=False,
+                error="Search request timed out",
+                metadata={"query": query}
             )
         
         except Exception as e:
