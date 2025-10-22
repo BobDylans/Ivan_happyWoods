@@ -22,6 +22,7 @@ except ImportError:
 
 from .state import AgentState, create_initial_state
 from .nodes import AgentNodes
+from .trace_emitter import TraceEmitter
 
 # 导入 LLM 兼容性工具
 try:
@@ -53,7 +54,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# 主类
+# 可以理解为一个service类，负责语音对话的整体流程控制
 class VoiceAgent:
     """
     主语音对话代理,使用 LangGraph 进行流程控制。
@@ -61,16 +62,21 @@ class VoiceAgent:
     该类协调对话流程通过不同处理阶段:
     输入处理、LLM 调用、工具处理和响应格式化。
     """
-    # 初始化方法
+    # 初始化方法，依次调用下面定义好的方法
     def __init__(self, config: VoiceAgentConfig):
         """使用配置初始化语音代理。"""
         self.config = config
         self.logger = logger  # Set logger before building graph
-        self.nodes = AgentNodes(config)
+        
+        # 创建追踪事件发射器
+        self.trace = TraceEmitter()
+        
+        # 将 trace 传递给 nodes
+        self.nodes = AgentNodes(config, trace=self.trace)
         self.graph = self._build_graph()
         
         self.logger.info("语音代理初始化成功")
-    
+    # 构建具体的执行方法
     def _build_graph(self):
         """构建 LangGraph 工作流。"""
         if not LANGGRAPH_AVAILABLE:
@@ -79,15 +85,15 @@ class VoiceAgent:
         # Create graph with state schema
         workflow = StateGraph(AgentState)
         
-        # Add nodes
+        # Add nodes 这里相当于@Bean注解下的一个一个实例，分别负责每一个具体的执行部分
         workflow.add_node("process_input", self.nodes.process_input)
         workflow.add_node("call_llm", self.nodes.call_llm)
         workflow.add_node("handle_tools", self.nodes.handle_tools)
         workflow.add_node("format_response", self.nodes.format_response)
         
-        # Set entry point
+        # 其实本质相当于将判断函数抽离出来，作为一个节点来传入
         workflow.set_entry_point("process_input")
-        
+        # 添加条件边来决定信息的走向
         # Add conditional edges based on next_action
         workflow.add_conditional_edges(
             "process_input",
@@ -122,6 +128,7 @@ class VoiceAgent:
         workflow.add_edge("format_response", END)
         
         # Compile workflow with checkpointer (memory or database)
+        # 通过已有的方法获取到checkPoint的节点，之后添加到service中实现持久化
         checkpointer = self._get_checkpointer()
         graph = workflow.compile(checkpointer=checkpointer)
         
@@ -141,6 +148,7 @@ class VoiceAgent:
             if self.config.session.storage_type == "database":
                 try:
                     from database import PostgreSQLCheckpointer
+                    # 调用其他包里面写好的获取数据库绘画的函数
                     self.logger.info("Using PostgreSQL checkpointer for persistence")
                     return PostgreSQLCheckpointer()
                 except Exception as e:
@@ -151,17 +159,19 @@ class VoiceAgent:
         
         # Default to memory saver
         self.logger.info("Using in-memory checkpointer")
+        # 这样就能获取到一个持久化工具
         return MemorySaver()
     
     def _route_after_input(self, state: AgentState) -> str:
-        """输入处理后的路由决策。"""
+        """ 输入 后的路由决策。"""
+        # 如果出现报错，就报错
         if state.get("error_state"):
             self.logger.warning(f"输入处理出错: {state['error_state']}")
             return "error"
-        
+        # 如果不需要继续，就结束
         if not state.get("should_continue", True):
             return "end"
-        
+        # 否则就获取到下一步的动作
         next_action = state.get("next_action")
         if next_action == "call_llm":
             return "call_llm"
@@ -177,6 +187,7 @@ class VoiceAgent:
         - 如果 LLM 返回工具调用 → 进入 handle_tools
         - 否则 → 进入 format_response 生成最终回复
         """
+        # 首先依旧是判断是否出现错误信息
         if state.get("error_state"):
             self.logger.warning(f"LLM 调用出错: {state['error_state']}")
             return "error"
@@ -186,7 +197,7 @@ class VoiceAgent:
         # 检查是否需要调用工具
         if next_action == "handle_tools":
             tool_call_count = state.get("tool_call_count", 0)
-            max_tool_iterations = 5  # 🆕 最大工具调用次数，防止无限循环
+            max_tool_iterations = 7  # 🆕 最大工具调用次数，防止无限循环
             
             if tool_call_count >= max_tool_iterations:
                 self.logger.warning(f"⚠️ 已达到最大工具调用次数 ({max_tool_iterations})，强制结束")
@@ -231,6 +242,7 @@ class VoiceAgent:
         self.logger.info("🔄 工具调用完成，默认返回 LLM")
         return "call_llm"
     # 同步处理单条信息
+    # 需要传入的信息包括，用户输入，会话ID，用户ID，模型设置（可以为空），会话历史（首次可以为空）
     async def process_message(
         self,
         user_input: str,
@@ -255,7 +267,7 @@ class VoiceAgent:
         try:
             self.logger.info(f"处理会话 {session_id} 的消息")
             
-            # Create initial state
+            # 根据入参创建一个初始状态
             initial_state = create_initial_state(
                 session_id=session_id,
                 user_input=user_input,
@@ -273,13 +285,13 @@ class VoiceAgent:
             # Configure thread for session persistence
             thread_config = {"configurable": {"thread_id": session_id}}
             
-            # Run the graph
+            # 将初始的状态信息放入到graph中运行
             final_state = await self.graph.ainvoke(
                 initial_state,
                 config=thread_config
             )
             
-            # Prepare response
+            # 格式化返回结果
             response = {
                 "success": True,
                 "response": final_state["agent_response"],
@@ -361,6 +373,7 @@ class VoiceAgent:
                 "message_count": 0
             }
     # 流式处理单条信息
+    # 它会一边执行，一边通过 yield 实时返回数据块（流式响应事件）
     async def process_message_stream(
         self,
         user_input: str,
@@ -374,7 +387,9 @@ class VoiceAgent:
         产生字典事件(结构见 AgentNodes.stream_llm_call)。
         流式传输完成后,将完整的助手响应持久化到对话历史。
         """
-        # Build initial state similar to process_message but manual step execution
+        import time  # 用于节点耗时计算
+        
+        # 同样是初始化节点
         initial_state = create_initial_state(
             session_id=session_id,
             user_input=user_input,
@@ -390,15 +405,44 @@ class VoiceAgent:
             self.logger.warning(f"⚠️ [Stream] No external_history provided to process_message_stream")
         
         accumulated_content = []  # 收集 delta 片段用于最终持久化
+        workflow_start_time = time.time()  # 记录整体开始时间
         
         try:
-            # 步骤 1: process_input
+            # 🆕 发射工作流开始事件
+            yield self.trace.workflow_started(session_id, user_input)
+            
+            # ============================================================
+            # 步骤 1: process_input 节点
+            # ============================================================
+            yield self.trace.node_started("process_input", session_id)
+            node_start_time = time.time()
+            
             state = await self.nodes.process_input(initial_state)
+            
+            node_duration = (time.time() - node_start_time) * 1000
+            yield self.trace.node_finished("process_input", session_id, node_duration)
+            
             if state.get('error_state'):
                 yield {"type": "error", "error": state['error_state']}
+                # 🆕 工作流异常结束
+                total_duration = (time.time() - workflow_start_time) * 1000
+                yield self.trace.workflow_complete(session_id, total_duration)
                 return
             
-            # 步骤 2: 流式 LLM 并累积内容
+            # 🆕 路由决策: process_input → call_llm
+            yield self.trace.route_decision(
+                "process_input", 
+                "call_llm", 
+                "输入验证通过，准备调用大模型",
+                session_id
+            )
+            
+            # ============================================================
+            # 步骤 2: call_llm 节点（流式）
+            # ============================================================
+            yield self.trace.node_started("call_llm", session_id)
+            node_start_time = time.time()
+            
             external_history_for_llm = state.get("external_history")
             messages = self.nodes._prepare_llm_messages(state, external_history=external_history_for_llm)
             model = state["model_config"].get("model", self.config.llm.models.default)
@@ -409,13 +453,27 @@ class VoiceAgent:
                 max_tokens=state.get("max_tokens", self.config.llm.max_tokens)
             )
             
+            # 流式调用 LLM（内部会发射 Node 层事件）
             async for event in self.nodes.stream_llm_call(messages, llm_config, session_id=session_id):
                 # 收集 delta 片段
                 if event.get("type") == "delta" and "content" in event:
                     accumulated_content.append(event["content"])
                 yield event
             
+            node_duration = (time.time() - node_start_time) * 1000
+            yield self.trace.node_finished("call_llm", session_id, node_duration)
+            
+            # 🆕 路由决策: call_llm → format_response
+            yield self.trace.route_decision(
+                "call_llm",
+                "format_response",
+                "LLM 生成完成，准备格式化响应",
+                session_id
+            )
+            
+            # ============================================================
             # 步骤 3: 将完整响应持久化到对话历史
+            # ============================================================
             if accumulated_content:
                 full_response = "".join(accumulated_content)
                 
@@ -445,6 +503,10 @@ class VoiceAgent:
                 except Exception as persist_error:
                     self.logger.warning(f"持久化流式历史失败: {persist_error}")
                     # 非致命:流式传输已成功完成
+            
+            # 🆕 发射工作流完成事件
+            total_duration = (time.time() - workflow_start_time) * 1000
+            yield self.trace.workflow_complete(session_id, total_duration)
         
         except asyncio.CancelledError:
             self.logger.info(f"会话 {session_id} 的流被取消")
@@ -460,11 +522,19 @@ class VoiceAgent:
                     await self.graph.ainvoke(state, config=thread_config)
                 except Exception:
                     pass
+            
+            # 🆕 工作流被取消也发射完成事件
+            total_duration = (time.time() - workflow_start_time) * 1000
+            yield self.trace.workflow_complete(session_id, total_duration)
             raise
         
         except Exception as e:
             self.logger.error(f"流式消息处理出错: {e}")
             yield {"type": "error", "error": str(e)}
+            
+            # 🆕 工作流异常也发射完成事件
+            total_duration = (time.time() - workflow_start_time) * 1000
+            yield self.trace.workflow_complete(session_id, total_duration)
     # 清除历史消息
     async def clear_conversation(self, session_id: str) -> Dict[str, Any]:
         """

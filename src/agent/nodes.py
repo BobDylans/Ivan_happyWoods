@@ -67,16 +67,20 @@ class AgentNodes:
     - 响应格式化
     """
     
-    def __init__(self, config: VoiceAgentConfig):
+    def __init__(self, config: VoiceAgentConfig, trace=None):
         """初始化节点配置
         
         Args:
             config: 语音助手配置对象
+            trace: 可选的 TraceEmitter 实例（用于可视化事件）
         """
         self.config = config
         self.logger = logger
         self._http_client: Optional[httpx.AsyncClient] = None
         self._client_lock = asyncio.Lock()
+        
+        # 接收 trace 实例
+        self.trace = trace
     
     async def _ensure_http_client(self):
         """确保 HTTP 客户端已初始化（懒加载）
@@ -162,8 +166,16 @@ class AgentNodes:
         Returns:
             更新后的对话状态
         """
+        session_id = state.get('session_id', 'unknown')
+        
         try:
-            self.logger.debug(f"处理会话 {state['session_id']} 的输入")
+            self.logger.debug(f"处理会话 {session_id} 的输入")
+            
+            # 🆕 思考阶段：验证输入
+            if self.trace:
+                # 注意：这里不能 yield，因为 process_input 是同步返回 state 的
+                # 我们只记录日志，真正的事件在 Graph 层发射
+                self.logger.debug(f"[Trace] process_input: 验证用户输入")
             
             # 更新时间戳
             state["last_activity"] = datetime.now()
@@ -884,6 +896,10 @@ class AgentNodes:
             - end: {version: '1.0', id: 'evt_xxx', timestamp: '...', type: 'end', content: full_text}
             - error: {version: '1.0', id: 'evt_xxx', timestamp: '...', type: 'error', error: msg}
         """
+        # 🆕 思考阶段：准备调用 LLM
+        if self.trace and session_id:
+            yield self.trace.thinking_phase("准备 LLM 流式调用", "call_llm", session_id)
+        
         # 导入事件工具函数
         try:
             from api.event_utils import (
@@ -1033,6 +1049,10 @@ class AgentNodes:
             if collected_tool_calls:
                 self.logger.info(f"🔧 [Stream] Detected {len(collected_tool_calls)} tool call(s), executing...")
                 
+                # 🆕 思考阶段：检测到工具调用
+                if self.trace and session_id:
+                    yield self.trace.llm_streaming("检测到工具调用", session_id, f"共 {len(collected_tool_calls)} 个工具")
+                
                 # 通知前端工具调用开始
                 yield create_tool_calls_event(tool_calls=collected_tool_calls, session_id=session_id)
                 
@@ -1047,8 +1067,21 @@ class AgentNodes:
                             arguments=json.loads(tc['function']['arguments']) if tc['function']['arguments'] else {}
                         )
                         
+                        # 🆕 工具调用排队事件
+                        if self.trace and session_id:
+                            yield self.trace.tool_call_pending(tool_call.name, tool_call.arguments, session_id)
+                        
+                        # 🆕 工具执行中事件
+                        if self.trace and session_id:
+                            yield self.trace.tool_executing(tool_call.name, session_id)
+                        
+                        import time
+                        tool_start_time = time.time()
+                        
                         # 执行工具
                         result = await self._execute_tool_call(tool_call)
+                        
+                        tool_duration = (time.time() - tool_start_time) * 1000
                         
                         # 格式化工具结果内容（使用 result 属性，不是 data）
                         if result.success:
@@ -1062,6 +1095,17 @@ class AgentNodes:
                         else:
                             result_content = f"Error: {result.error}"
                         
+                        # 🆕 工具结果事件
+                        if self.trace and session_id:
+                            summary = result_content[:100] + "..." if len(result_content) > 100 else result_content
+                            yield self.trace.tool_result(
+                                tool_call.name, 
+                                result.success, 
+                                summary, 
+                                session_id,
+                                tool_duration
+                            )
+                        
                         tool_results.append({
                             'tool_call_id': tool_call.id,
                             'role': 'tool',
@@ -1073,12 +1117,26 @@ class AgentNodes:
                         
                     except Exception as e:
                         self.logger.error(f"❌ [Stream] Tool execution failed: {e}")
+                        
+                        # 🆕 工具失败事件
+                        if self.trace and session_id:
+                            yield self.trace.tool_result(
+                                tc['function']['name'],
+                                False,
+                                f"执行失败: {str(e)}",
+                                session_id
+                            )
+                        
                         tool_results.append({
                             'tool_call_id': tc.get('id', 'unknown'),
                             'role': 'tool',
                             'name': tc['function']['name'],
                             'content': f"Error: {str(e)}"
                         })
+                
+                # 🆕 思考阶段：基于工具结果再次调用 LLM
+                if self.trace and session_id:
+                    yield self.trace.llm_streaming("基于工具结果重新思考", session_id)
                 
                 # 将工具结果添加到消息历史，再次调用 LLM（流式）
                 self.logger.info(f"🔄 [Stream] Calling LLM again with tool results...")
