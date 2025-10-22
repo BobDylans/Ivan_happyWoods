@@ -63,7 +63,9 @@ async def lifespan(app: FastAPI):
     # Initialize MCP tools
     try:
         from mcp.init_tools import initialize_default_tools
-        registered_tools = initialize_default_tools()
+        # 🔧 Pass config to tools for Tavily API integration
+        config_dict = app.state.config.model_dump() if hasattr(app.state.config, 'model_dump') else {}
+        registered_tools = initialize_default_tools(config=config_dict)
         logger.info(f"Initialized {len(registered_tools)} MCP tools: {', '.join(registered_tools)}")
     except Exception as e:
         logger.warning(f"Could not initialize MCP tools: {e}")

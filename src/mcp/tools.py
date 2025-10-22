@@ -223,11 +223,20 @@ class WeatherTool(Tool):
 
 class SearchTool(Tool):
     """
-    Web search tool (mock implementation).
+    Web search tool with Tavily API integration.
     
-    In production, this would connect to a search API (Google, Bing, DuckDuckGo).
-    Currently returns mock search results.
+    Tavily provides AI-optimized search results with high-quality snippets,
+    relevance scores, and optional AI-generated answers.
     """
+    
+    def __init__(self, config: Dict[str, Any] = None):
+        """
+        Initialize SearchTool with configuration.
+        
+        Args:
+            config: Configuration dict with api_key, search_depth, etc.
+        """
+        self.config = config or {}
     
     @property
     def name(self) -> str:
@@ -235,7 +244,7 @@ class SearchTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Search the web for information. Returns relevant search results with titles and snippets."
+        return "Search the web for real-time information. Returns relevant search results with titles, snippets, URLs, and relevance scores. Supports both English and Chinese queries."
     
     @property
     def parameters(self):
@@ -243,7 +252,7 @@ class SearchTool(Tool):
             ToolParameter(
                 name="query",
                 type=ToolParameterType.STRING,
-                description="Search query (e.g., 'latest AI news', 'Python tutorial')",
+                description="Search query (e.g., 'latest AI news', 'Python tutorial', '人工智能最新进展')",
                 required=True
             ),
             ToolParameter(
@@ -256,38 +265,84 @@ class SearchTool(Tool):
         ]
     
     async def execute(self, query: str, num_results: int = 5, **kwargs) -> ToolResult:
-        """Perform web search."""
+        """Perform web search using Tavily API."""
+        import os
+        
         try:
             # Limit results
             num_results = max(1, min(num_results, 10))
             
-            # Simulate API call delay
-            await asyncio.sleep(0.2)
+            # Get API key from config or environment
+            api_key = self.config.get("api_key") or os.getenv("TAVILY_API_KEY")
             
-            # Mock search results
-            mock_results = [
-                {
-                    "title": f"Result {i+1} for '{query}'",
-                    "snippet": f"This is a mock search result snippet for query: {query}. "
-                               f"In production, this would return real search results.",
-                    "url": f"https://example.com/result{i+1}",
-                    "rank": i + 1
-                }
-                for i in range(num_results)
-            ]
+            if not api_key:
+                logger.warning("Tavily API key not found, using mock results")
+                return self._mock_search(query, num_results)
+            
+            # Prepare Tavily API request
+            search_depth = self.config.get("search_depth", "basic")
+            tavily_url = "https://api.tavily.com/search"
+            
+            payload = {
+                "api_key": api_key,
+                "query": query,
+                "search_depth": search_depth,
+                "max_results": num_results,
+                "include_answer": True,
+                "include_raw_content": False,
+                "include_images": False
+            }
+            
+            logger.info(f"🔍 Calling Tavily API for query: {query[:50]}...")
+            
+            # Make API call
+            async with httpx.AsyncClient(timeout=self.config.get("timeout", 15)) as client:
+                response = await client.post(tavily_url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+            
+            # Parse Tavily response
+            results = []
+            for item in data.get("results", []):
+                results.append({
+                    "title": item.get("title", ""),
+                    "snippet": item.get("content", ""),
+                    "url": item.get("url", ""),
+                    "score": item.get("score", 0.0),
+                    "published_date": item.get("published_date")
+                })
+            
+            logger.info(f"✅ Tavily returned {len(results)} results")
             
             return ToolResult(
                 success=True,
                 data={
                     "query": query,
-                    "results": mock_results,
-                    "total_results": num_results
+                    "ai_answer": data.get("answer"),  # AI-generated summary
+                    "results": results,
+                    "total_results": len(results)
                 },
                 metadata={
-                    "source": "mock",
-                    "note": "These are simulated results. Connect to real search API for production.",
-                    "search_time_ms": 200
+                    "source": "tavily",
+                    "search_depth": search_depth,
+                    "response_time": data.get("response_time", 0)
                 }
+            )
+        
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Tavily API HTTP error: {e.response.status_code} - {e.response.text}")
+            return ToolResult(
+                success=False,
+                error=f"Search API error: {e.response.status_code}",
+                metadata={"query": query, "status_code": e.response.status_code}
+            )
+        
+        except httpx.TimeoutException:
+            logger.error(f"Tavily API timeout for query: {query}")
+            return ToolResult(
+                success=False,
+                error="Search request timed out",
+                metadata={"query": query}
             )
         
         except Exception as e:
@@ -297,6 +352,33 @@ class SearchTool(Tool):
                 error=f"Search failed: {str(e)}",
                 metadata={"query": query}
             )
+    
+    def _mock_search(self, query: str, num_results: int) -> ToolResult:
+        """Fallback mock search when API key is not available."""
+        mock_results = [
+            {
+                "title": f"Result {i+1} for '{query}'",
+                "snippet": f"This is a mock search result. Please configure TAVILY_API_KEY for real results.",
+                "url": f"https://example.com/result{i+1}",
+                "score": 0.5,
+                "published_date": None
+            }
+            for i in range(num_results)
+        ]
+        
+        return ToolResult(
+            success=True,
+            data={
+                "query": query,
+                "ai_answer": "Mock answer: Please configure Tavily API key for real search results.",
+                "results": mock_results,
+                "total_results": num_results
+            },
+            metadata={
+                "source": "mock",
+                "note": "Using mock data. Set TAVILY_API_KEY for real results."
+            }
+        )
 
 
 # 创建这些工具的基本实现类

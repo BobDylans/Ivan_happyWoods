@@ -5,7 +5,7 @@ Initialize and register default tools for the agent system.
 """
 
 import logging
-from typing import List
+from typing import List, Optional, Dict, Any
 
 from .registry import get_tool_registry
 from .tools import (
@@ -19,20 +19,29 @@ from .voice_tools import create_voice_tools
 logger = logging.getLogger(__name__)
 
 
-def initialize_default_tools() -> List[str]:
+def initialize_default_tools(config: Optional[Dict[str, Any]] = None) -> List[str]:
     """
     Initialize and register all default MCP tools.
+    
+    Args:
+        config: Configuration dictionary (optional)
     
     Returns:
         List of registered tool names
     """
     registry = get_tool_registry()
     
+    # Get search tool config
+    search_tool_config = {}
+    if config and "tools" in config and "search_tool" in config["tools"]:
+        search_tool_config = config["tools"]["search_tool"]
+        logger.info(f"🔧 Configuring SearchTool with Tavily API")
+    
     tools_to_register = [
         CalculatorTool(),
         TimeTool(),
         WeatherTool(),
-        SearchTool(),
+        SearchTool(config=search_tool_config),  # Pass config to SearchTool
     ] + create_voice_tools()
     
     registered_names = []
