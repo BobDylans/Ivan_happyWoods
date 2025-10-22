@@ -34,7 +34,7 @@ class STTConfig:
     base_url: str = "wss://iat.cn-huabei-1.xf-yun.com/v1"
     
     # 识别参数（参考官方demo）
-    domain: str = "slm"  # slm=超大模型, iat=通用模型
+    domain: str = "iat"  # slm=超大模型, iat=通用模型
     language: str = "mul_cn"  # mul_cn=多语种中文
     accent: str = "mandarin"
     
@@ -57,6 +57,7 @@ class IFlytekSTTService:
     
     def __init__(self, config: STTConfig):
         self.config = config
+        # 从环境变量中获取到相关信息
         self.auth = IFlytekAuthenticator(config.api_key, config.api_secret)
     
     async def recognize(self, audio_data: bytes) -> STTResult:
@@ -92,7 +93,7 @@ class IFlytekSTTService:
                     text=result_text,
                     success=True
                 )
-                
+        # 进行异常处理        
         except WebSocketException as e:
             logger.error(f"WebSocket错误: {e}")
             return STTResult(
@@ -109,7 +110,7 @@ class IFlytekSTTService:
                 error_code=-1,
                 error_message=str(e)
             )
-    
+    # 具体发送音频文件的方式
     async def _send_audio_frames(self, ws, audio_data: bytes):
         """发送音频帧（按照官方demo的格式）"""
         
@@ -205,7 +206,7 @@ class IFlytekSTTService:
                 await asyncio.sleep(interval)
         
         logger.info(f"音频发送完成")
-    
+    # 严格按照官方的方式来接收信息
     async def _receive_results(self, ws) -> str:
         """接收识别结果（按照官方demo的解析方式）"""
         

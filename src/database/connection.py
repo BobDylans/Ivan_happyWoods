@@ -7,7 +7,7 @@ Provides async database connectivity using SQLAlchemy and asyncpg.
 import logging
 from typing import AsyncGenerator, Optional
 from contextlib import asynccontextmanager
-
+# 导入相关的信息
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
     AsyncEngine,
@@ -21,11 +21,11 @@ from .models import Base
 
 logger = logging.getLogger(__name__)
 
-# Global engine and session factory
+# 全局变量：数据库引擎
 _engine: Optional[AsyncEngine] = None
 _async_session_factory: Optional[async_sessionmaker] = None
 
-
+# 将数据库的url进行拼接，生成具体可用的url
 def get_database_url(config) -> str:
     """
     Construct database URL from config.
@@ -41,7 +41,7 @@ def get_database_url(config) -> str:
         f"@{config.host}:{config.port}/{config.database}"
     )
 
-
+# 初始化数据库连接池
 async def init_db(config, echo: bool = False) -> AsyncEngine:
     """
     Initialize database connection pool.
@@ -54,15 +54,16 @@ async def init_db(config, echo: bool = False) -> AsyncEngine:
         AsyncEngine instance
     """
     global _engine, _async_session_factory
-    
+    # 如果数据库引擎已经存在，则不用再创建
     if _engine is not None:
         logger.warning("Database already initialized, returning existing engine")
         return _engine
-    
+    # 调用方法获取到url
     database_url = get_database_url(config)
     
     # Create async engine
     _engine = create_async_engine(
+        # 将相关参数带入，创建数据库引擎
         database_url,
         echo=echo,
         poolclass=AsyncAdaptedQueuePool,
@@ -85,7 +86,7 @@ async def init_db(config, echo: bool = False) -> AsyncEngine:
     
     return _engine
 
-
+# 根据项目中的类来创建对应的数据库表
 async def create_tables():
     """
     Create all tables defined in models.
@@ -145,7 +146,7 @@ def get_db_engine() -> AsyncEngine:
         raise RuntimeError("Database not initialized. Call init_db() first.")
     return _engine
 
-
+# 获取到数据库会话，用于执行实际sql
 @asynccontextmanager
 async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     """
@@ -172,7 +173,7 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
         finally:
             await session.close()
 
-
+# 检查数据库是否健康
 async def check_db_health() -> bool:
     """
     Check database connectivity.
@@ -188,7 +189,7 @@ async def check_db_health() -> bool:
         logger.error(f"Database health check failed: {e}")
         return False
 
-
+# 获取当数据库的状态
 async def get_db_stats() -> dict:
     """
     Get database statistics.

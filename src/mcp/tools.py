@@ -14,7 +14,7 @@ from .base import Tool, ToolParameter, ToolParameterType, ToolResult, ToolExecut
 
 logger = logging.getLogger(__name__)
 
-
+# 这里是说明这个计算器 MCP是也是集成了Tool这个接口
 class CalculatorTool(Tool):
     """
     Calculator tool for mathematical expressions.
@@ -22,6 +22,7 @@ class CalculatorTool(Tool):
     Evaluates mathematical expressions safely.
     """
     
+    # 在这里定义好当前MCP的名字，描述和执行方法（excute），其默认返回的类型是固定的
     @property
     def name(self) -> str:
         return "calculator"
@@ -75,7 +76,7 @@ class CalculatorTool(Tool):
                 metadata={"expression": expression}
             )
 
-
+# 同样是继承自Tool类，实现方法基本一致
 class TimeTool(Tool):
     """
     Time/date information tool.
@@ -222,13 +223,11 @@ class WeatherTool(Tool):
 
 class SearchTool(Tool):
     """
-    Web search tool using Tavily API.
+    Web search tool (mock implementation).
     
-    Tavily provides AI-optimized search results with high quality content.
+    In production, this would connect to a search API (Google, Bing, DuckDuckGo).
+    Currently returns mock search results.
     """
-    
-    # Hardcoded API key (TODO: Move to environment variables)
-    TAVILY_API_KEY = "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"
     
     @property
     def name(self) -> str:
@@ -236,7 +235,7 @@ class SearchTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Search the web for information using Tavily API. Returns relevant search results with titles, snippets, and URLs."
+        return "Search the web for information. Returns relevant search results with titles and snippets."
     
     @property
     def parameters(self):
@@ -257,76 +256,38 @@ class SearchTool(Tool):
         ]
     
     async def execute(self, query: str, num_results: int = 5, **kwargs) -> ToolResult:
-        """Perform web search using Tavily API."""
+        """Perform web search."""
         try:
-            import httpx
-            
             # Limit results
             num_results = max(1, min(num_results, 10))
             
-            # Tavily API endpoint
-            url = "https://api.tavily.com/search"
+            # Simulate API call delay
+            await asyncio.sleep(0.2)
             
-            # Prepare request payload
-            payload = {
-                "api_key": self.TAVILY_API_KEY,
-                "query": query,
-                "max_results": num_results,
-                "search_depth": "basic",  # or "advanced" for deeper search
-                "include_answer": True,   # Get AI-generated answer
-                "include_raw_content": False,
-                "include_images": False
-            }
-            
-            # Make async HTTP request
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(url, json=payload)
-                response.raise_for_status()
-                data = response.json()
-            
-            # Extract results
-            results = []
-            for i, result in enumerate(data.get("results", []), 1):
-                results.append({
-                    "title": result.get("title", "No title"),
-                    "snippet": result.get("content", "No content available"),
-                    "url": result.get("url", ""),
-                    "score": result.get("score", 0),
-                    "rank": i
-                })
-            
-            # Get AI-generated answer if available
-            ai_answer = data.get("answer", "")
+            # Mock search results
+            mock_results = [
+                {
+                    "title": f"Result {i+1} for '{query}'",
+                    "snippet": f"This is a mock search result snippet for query: {query}. "
+                               f"In production, this would return real search results.",
+                    "url": f"https://example.com/result{i+1}",
+                    "rank": i + 1
+                }
+                for i in range(num_results)
+            ]
             
             return ToolResult(
                 success=True,
                 data={
                     "query": query,
-                    "results": results,
-                    "total_results": len(results),
-                    "ai_answer": ai_answer  # AI-generated summary answer
+                    "results": mock_results,
+                    "total_results": num_results
                 },
                 metadata={
-                    "source": "tavily",
-                    "search_depth": "basic",
-                    "response_time": data.get("response_time", 0)
+                    "source": "mock",
+                    "note": "These are simulated results. Connect to real search API for production.",
+                    "search_time_ms": 200
                 }
-            )
-        
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Tavily API HTTP error: {e.response.status_code} - {e.response.text}")
-            return ToolResult(
-                success=False,
-                error=f"Search API error: {e.response.status_code}",
-                metadata={"query": query, "error_detail": str(e)}
-            )
-        
-        except httpx.TimeoutException:
-            logger.error(f"Tavily API timeout for query: {query}")
-            return ToolResult(
-                success=False,
-                error="Search request timed out",
-                metadata={"query": query}
             )
         
         except Exception as e:
@@ -338,7 +299,7 @@ class SearchTool(Tool):
             )
 
 
-# Factory function to create all default tools
+# 创建这些工具的基本实现类
 def create_default_tools():
     """
     Create instances of all default tools.

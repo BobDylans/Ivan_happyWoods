@@ -13,7 +13,7 @@ from wsgiref.handlers import format_date_time
 from time import mktime
 from typing import Tuple
 
-
+# 这个类里面实现了讯飞的认证流程
 class IFlytekAuthError(Exception):
     """iFlytek 认证错误"""
     pass

@@ -20,7 +20,8 @@ from .models import Base
 
 logger = logging.getLogger(__name__)
 
-
+# 也就是graph在运行时，会保存一些状态，这些状态会保存在数据库中
+# 可以保证对话的流畅
 class CheckpointModel(Base):
     """Database model for storing LangGraph checkpoints."""
     

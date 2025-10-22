@@ -165,7 +165,34 @@ class ConversationService:
         self,
         user_input: str,
         session_id: Optional[str] = None,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        session_manager: Optional[Any] = None
+    ) -> tuple[str, str, Dict[str, Any]]:
+        """
+        公开方法：调用智能体获取回复
+        
+        Args:
+            user_input: 用户输入文本
+            session_id: 会话ID（用于多轮对话）
+            user_id: 用户ID
+            session_manager: 会话历史管理器（可选）
+        
+        Returns:
+            (智能体回复文本, 会话ID, 元数据)
+        """
+        return await self._call_agent(
+            user_input=user_input,
+            session_id=session_id,
+            user_id=user_id,
+            session_manager=session_manager
+        )
+    
+    async def _call_agent(
+        self,
+        user_input: str,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        session_manager: Optional[Any] = None
     ) -> tuple[str, str, Dict[str, Any]]:
         """
         调用智能体获取回复
@@ -174,6 +201,7 @@ class ConversationService:
             user_input: 用户输入文本
             session_id: 会话ID（用于多轮对话）
             user_id: 用户ID
+            session_manager: 会话历史管理器（可选）
         
         Returns:
             (智能体回复文本, 会话ID, 元数据)
@@ -184,12 +212,24 @@ class ConversationService:
         
         logger.info(f"调用智能体: session_id={session_id}, input={user_input[:100]}...")
         
+        # 🔍 获取会话历史（如果提供了 session_manager）
+        external_history = None
+        if session_manager:
+            try:
+                history = session_manager.get_history(session_id)
+                if history:
+                    external_history = history
+                    logger.info(f"📜 已加载 {len(history)} 条历史消息")
+            except Exception as e:
+                logger.warning(f"获取会话历史失败: {e}")
+        
         try:
             # 调用智能体（带会话记忆）
             result = await self.agent.process_message(
                 user_input=user_input,
                 session_id=session_id,
-                user_id=user_id or "anonymous"
+                user_id=user_id or "anonymous",
+                external_history=external_history  # ✅ 传递历史记录
             )
             
             # 提取回复
@@ -199,6 +239,15 @@ class ConversationService:
                 agent_response = "抱歉，我没有理解你的问题，请重新表达。"
             
             logger.info(f"智能体回复: {agent_response[:100]}...")
+            
+            # 💾 保存新消息到会话历史（如果提供了 session_manager）
+            if session_manager:
+                try:
+                    session_manager.add_message(session_id, "user", user_input)
+                    session_manager.add_message(session_id, "assistant", agent_response)
+                    logger.info(f"✅ 已保存对话到会话历史")
+                except Exception as e:
+                    logger.warning(f"保存会话历史失败: {e}")
             
             # 序列化所有 datetime 对象
             metadata = serialize_datetime({
@@ -297,7 +346,8 @@ class ConversationService:
         pitch: int = 50,
         # 会话参数
         session_id: Optional[str] = None,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        session_manager: Optional[Any] = None  # ✅ 添加 session_manager 参数
     ) -> Dict[str, Any]:
         """
         处理完整的对话流程（非流式）
@@ -338,10 +388,11 @@ class ConversationService:
             result["input_metadata"] = input_metadata
             
             # 2. 获取智能体回复
-            agent_response, session_id, agent_metadata = await self.get_agent_response(
+            agent_response, session_id, agent_metadata = await self._call_agent(
                 user_input=user_input,
                 session_id=session_id,
-                user_id=user_id
+                user_id=user_id,
+                session_manager=session_manager  # ✅ 传递 session_manager
             )
             result["agent_response"] = agent_response
             result["session_id"] = session_id

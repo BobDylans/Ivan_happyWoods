@@ -3,6 +3,7 @@ Message Repository
 
 Data access layer for message management.
 """
+# 这里专门处理和消息相关的数据库操作
 
 import logging
 from datetime import datetime, timedelta

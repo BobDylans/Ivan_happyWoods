@@ -8,7 +8,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -84,7 +84,8 @@ def get_conv_service() -> ConversationService:
 )
 async def send_text_message(
     request: ConversationRequest,
-    service: ConversationService = Depends(get_conv_service)
+    service: ConversationService = Depends(get_conv_service),
+    fastapi_request: Request = None  # ✅ 添加 Request 依赖
 ) -> ConversationResponse:
     """
     文本输入对话接口
@@ -173,7 +174,8 @@ async def send_text_message(
             volume=request.volume,
             pitch=request.pitch,
             session_id=request.session_id,
-            user_id=request.user_id
+            user_id=request.user_id,
+            session_manager=getattr(fastapi_request.app.state, 'session_manager', None)  # ✅ 传递 session_manager
         )
         
         if not result["success"]:
@@ -203,7 +205,8 @@ async def send_audio_message(
     pitch: int = Form(default=50, ge=0, le=100, description="音调"),
     session_id: Optional[str] = Form(default=None, description="会话ID"),
     user_id: Optional[str] = Form(default=None, description="用户ID"),
-    service: ConversationService = Depends(get_conv_service)
+    service: ConversationService = Depends(get_conv_service),
+    fastapi_request: Request = None  # ✅ 添加 Request 依赖
 ) -> ConversationResponse:
     """
     语音输入对话接口
@@ -311,7 +314,8 @@ async def send_audio_message(
             volume=volume,
             pitch=pitch,
             session_id=session_id,
-            user_id=user_id
+            user_id=user_id,
+            session_manager=getattr(fastapi_request.app.state, 'session_manager', None)  # ✅ 传递 session_manager
         )
         
         if not result["success"]:
@@ -334,7 +338,8 @@ async def send_audio_message(
 )
 async def send_text_message_stream(
     request: ConversationRequest,
-    service: ConversationService = Depends(get_conv_service)
+    service: ConversationService = Depends(get_conv_service),
+    fastapi_request: Request = None  # ✅ 添加 Request 依赖
 ):
     """
     文本输入，流式语音输出
@@ -389,7 +394,8 @@ async def send_text_message_stream(
         agent_response, session_id, agent_metadata = await service.get_agent_response(
             user_input=user_input,
             session_id=request.session_id,
-            user_id=request.user_id
+            user_id=request.user_id,
+            session_manager=getattr(fastapi_request.app.state, 'session_manager', None)  # ✅ 传递 session_manager
         )
         
         logger.info(f"流式输出: session={session_id}, response={agent_response[:100]}...")
@@ -447,7 +453,8 @@ async def send_audio_message_stream(
     pitch: int = Form(default=50, description="音调"),
     session_id: Optional[str] = Form(default=None, description="会话ID"),
     user_id: Optional[str] = Form(default=None, description="用户ID"),
-    service: ConversationService = Depends(get_conv_service)
+    service: ConversationService = Depends(get_conv_service),
+    fastapi_request: Request = None  # ✅ 添加 Request 依赖
 ):
     """
     完整的语音对话（语音输入 → 语音输出）
@@ -545,7 +552,8 @@ async def send_audio_message_stream(
         agent_response, session_id_result, agent_metadata = await service.get_agent_response(
             user_input=user_input,
             session_id=session_id,
-            user_id=user_id
+            user_id=user_id,
+            session_manager=getattr(fastapi_request.app.state, 'session_manager', None)  # ✅ 传递 session_manager
         )
         
         logger.info(f"智能体回复: {agent_response[:100]}...")

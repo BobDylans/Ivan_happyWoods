@@ -10,7 +10,7 @@ from .base import Tool, ToolExecutionError
 
 logger = logging.getLogger(__name__)
 
-
+# 在这里实现了注册
 class ToolRegistry:
     """
     Registry for managing MCP tools.
@@ -27,12 +27,13 @@ class ToolRegistry:
         logger.info("Tool registry initialized")
     
     @classmethod
+    # 首先是获取单例
     def get_instance(cls) -> "ToolRegistry":
         """Get singleton registry instance."""
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
-    
+    # 之后实现注册
     def register(self, tool: Tool) -> None:
         """
         Register a tool with the registry.
@@ -43,6 +44,7 @@ class ToolRegistry:
         Raises:
             ValueError: If tool with same name already registered
         """
+        # 主要是确保工具的名称全局唯一
         if tool.name in self._tools:
             raise ValueError(f"Tool '{tool.name}' is already registered")
         
@@ -58,7 +60,7 @@ class ToolRegistry:
         """
         tool = tool_class()
         self.register(tool)
-    
+    # 注销工具
     def unregister(self, tool_name: str) -> None:
         """
         Unregister a tool from the registry.
@@ -69,7 +71,7 @@ class ToolRegistry:
         if tool_name in self._tools:
             del self._tools[tool_name]
             logger.info(f"Unregistered tool: {tool_name}")
-    
+    # 获取工具
     def get(self, tool_name: str) -> Optional[Tool]:
         """
         Get a tool by name.
@@ -81,7 +83,7 @@ class ToolRegistry:
             Tool instance or None if not found
         """
         return self._tools.get(tool_name)
-    
+    # 列出所有工具，用于展示可以使用的工具
     def list_tools(self) -> List[Tool]:
         """
         Get list of all registered tools.
@@ -90,7 +92,7 @@ class ToolRegistry:
             List of registered tool instances
         """
         return list(self._tools.values())
-    
+    # 列出所有工具的名称, 这个只有名称
     def list_tool_names(self) -> List[str]:
         """
         Get list of registered tool names.
@@ -99,7 +101,8 @@ class ToolRegistry:
             List of tool names
         """
         return list(self._tools.keys())
-    
+    # 将它把每个 Tool 的元信息（name, description, parameters）转换成OpenAI Function Calling 格式的 JSON Schema。
+    # 方便langgraph来调用
     def get_schemas(self) -> List[Dict]:
         """
         Get OpenAI function calling schemas for all tools.
@@ -123,6 +126,7 @@ class ToolRegistry:
         Raises:
             ToolExecutionError: If tool not found or execution fails
         """
+        # 首先获取到工具名称
         tool = self.get(tool_name)
         if tool is None:
             raise ToolExecutionError(
@@ -162,7 +166,7 @@ class ToolRegistry:
         return f"<ToolRegistry: {len(self)} tools registered>"
 
 
-# Global registry instance accessor
+# 获得全局变量的单例工具
 def get_tool_registry() -> ToolRegistry:
     """
     Get the global tool registry instance.
@@ -170,4 +174,5 @@ def get_tool_registry() -> ToolRegistry:
     Returns:
         Singleton ToolRegistry instance
     """
+    # 调用类内部的方法来返回单例
     return ToolRegistry.get_instance()

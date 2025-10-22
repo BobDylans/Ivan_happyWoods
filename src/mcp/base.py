@@ -9,7 +9,8 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
 from enum import Enum
 
-
+# 首先定义参数类型枚举类，
+# 因为functionCall的对应规则和python不完全一样，我们需要保证二者能够识别
 class ToolParameterType(str, Enum):
     """Parameter types for tool inputs."""
     STRING = "string"
@@ -19,7 +20,7 @@ class ToolParameterType(str, Enum):
     OBJECT = "object"
     ARRAY = "array"
 
-
+# 工具参数的具体定义
 class ToolParameter(BaseModel):
     """
     Tool parameter definition.
@@ -28,6 +29,7 @@ class ToolParameter(BaseModel):
     """
     name: str = Field(..., description="Parameter name")
     type: ToolParameterType = Field(..., description="Parameter type")
+    #用于给LLM来了解什么时候调用该工具
     description: str = Field(..., description="Parameter description")
     required: bool = Field(default=False, description="Whether parameter is required")
     enum: Optional[List[str]] = Field(default=None, description="Allowed values")
@@ -36,7 +38,7 @@ class ToolParameter(BaseModel):
     class Config:
         use_enum_values = True
 
-
+# 执行结果的定义
 class ToolResult(BaseModel):
     """
     Result from tool execution.
@@ -80,7 +82,7 @@ class Tool(ABC):
     def __init__(self):
         """Initialize the tool."""
         self._validate_schema()
-    
+    # 工具的唯一名称
     @property
     @abstractmethod
     def name(self) -> str:
@@ -128,7 +130,7 @@ class Tool(ABC):
             ToolExecutionError: If execution fails
         """
         pass
-    
+    # 将所有的代码格式转换为openAI所定义的格式，这样LLM才能理解
     def to_openai_schema(self) -> Dict[str, Any]:
         """
         Convert tool definition to OpenAI function calling schema.
