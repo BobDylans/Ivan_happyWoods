@@ -89,6 +89,7 @@ tools_router = APIRouter(prefix="/tools", tags=["Tools"])
 async def chat_message(
     request: ChatRequest,
     background_tasks: BackgroundTasks,
+    req: Request,  # ✅ 添加 Request 以访问 app.state
     agent = Depends(get_voice_agent)
 ):
     """
@@ -121,6 +122,10 @@ async def chat_message(
         #判断是否需要流式返回
         effective_model_cfg = request.model_params or request.model_config_override
         if request.stream:
+            # 🔧 获取 session_manager 和历史记录
+            session_manager = req.app.state.session_manager
+            external_history = session_manager.get_history(session_id)
+            
             async def event_generator():
                 try:
                     variant = request.model_variant
@@ -137,25 +142,47 @@ async def chat_message(
                         user_input=request.message,
                         session_id=session_id,
                         user_id=request.user_id,
-                        model_config=effective_cfg
+                        model_config=effective_cfg,
+                        external_history=external_history  # 🔧 传递历史记录
                     ):
                         if event.get('type') == 'delta' and event.get('content'):
                             collected.append(event['content'])
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                         if event.get('type') == 'end':
-                            # 写入历史（简单调用一次普通处理以复用格式化逻辑）
-                            # 这里可以改为直接写入，但为简化暂时重用 process_message
                             break
+                    
+                    # 🔧 流式完成后保存消息到历史
+                    if collected:
+                        full_response = "".join(collected)
+                        logger.info(f"💾 [POST /chat/] 保存对话到历史 - session: {session_id}, user: {request.message[:50]}..., assistant: {len(full_response)} 字符")
+                        session_manager.add_message(session_id, "user", request.message)
+                        session_manager.add_message(session_id, "assistant", full_response)
+                        logger.info(f"✅ [POST /chat/] 历史记录已保存，当前历史长度: {len(session_manager.get_history(session_id))}")
+                        
                 except Exception as e:
                     yield f"data: {json.dumps({'type':'error','error':str(e)}, ensure_ascii=False)}\n\n"
             return StreamingResponse(event_generator(), media_type="text/event-stream")
         else:
+            # 🔧 非流式模式：获取历史记录
+            session_manager = req.app.state.session_manager
+            external_history = session_manager.get_history(session_id)
+            
             result = await agent.process_message(
                 user_input=request.message,
                 session_id=session_id,
                 user_id=request.user_id,
-                model_config=effective_model_cfg
+                model_config=effective_model_cfg,
+                external_history=external_history  # 🔧 传递历史记录
             )
+            
+            # 🔧 保存消息到历史
+            if result.get("success") and result.get("response"):
+                try:
+                    session_manager.add_message(session_id, "user", request.message)
+                    session_manager.add_message(session_id, "assistant", result.get("response"))
+                    logger.info(f"💾 [POST /chat/ 非流式] 已保存对话到历史 - session: {session_id}")
+                except Exception as e:
+                    logger.warning(f"保存会话历史失败: {e}")
         
         # Calculate processing time
         processing_time = (time.time() - start_time) * 1000
