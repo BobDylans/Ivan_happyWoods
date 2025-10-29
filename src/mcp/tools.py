@@ -244,7 +244,63 @@ class SearchTool(Tool):
     
     @property
     def description(self) -> str:
-        return "Search the web for real-time information. Returns relevant search results with titles, snippets, URLs, and relevance scores. Supports both English and Chinese queries."
+        return """Search the web for real-time information using Tavily API.
+
+WHEN TO USE THIS TOOL:
+- User asks for current events, news, or recent information
+- User needs to verify facts, statistics, or find specific data
+- Query contains keywords like: "search", "find", "latest", "news", "搜索", "查找", "最新", "新闻"
+- Information requested is time-sensitive or may have changed recently
+
+WHAT THIS TOOL RETURNS:
+- ai_answer: AI-generated summary of search results (PRIORITY: Use this first if available!)
+- results: List of relevant web pages with:
+  * title: Page/article title
+  * snippet: Brief excerpt (50-150 words)
+  * url: Source URL (always provide clickable links)
+  * score: Relevance score (0.0-1.0, higher is better)
+  * published_date: Publication date (if available)
+
+BEST PRACTICES FOR QUALITY RESULTS:
+1. Keep queries concise but specific (e.g., "Trump Japan visit 2025" NOT "Tell me everything about Trump")
+2. Use English for international topics to maximize result quality
+3. For Chinese topics, use Chinese keywords for better local coverage
+4. Set num_results to 5-8 for optimal balance of quality and speed
+5. Sort by score/relevance when presenting results
+
+CRITICAL: HOW TO PRESENT SEARCH RESULTS
+After calling this tool, you MUST:
+✅ Structure results in clear Markdown format with headers and lists
+✅ Present the ai_answer summary first (if present and valuable)
+✅ Extract and display actual content from each result (title + snippet + url)
+✅ Provide clickable links in format: [Title](URL)
+✅ Include publication dates when available
+✅ Highlight the most relevant 3-5 results based on score
+
+❌ NEVER just say "Found X results" without showing content
+❌ NEVER return raw JSON or tool parameters
+❌ NEVER omit the snippet content
+❌ NEVER ignore the ai_answer field
+
+EXAMPLE RESPONSE FORMAT:
+## 🔍 Search Results: [Topic]
+
+### 📊 Summary
+[Use ai_answer here if available, or synthesize from top results]
+
+### 📰 Detailed Results
+
+1. **[Article Title 1]**
+   - 📅 Published: [date]
+   - 📝 [Key points from snippet]
+   - 🔗 [Read more](url)
+
+2. **[Article Title 2]**
+   ...
+
+---
+💡 **Key Insight**: [One-sentence conclusion or trend observation]
+"""
     
     @property
     def parameters(self):
