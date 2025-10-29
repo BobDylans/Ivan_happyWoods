@@ -8,6 +8,8 @@ and response formatting.
 
 import json
 import logging
+import random
+import time
 from typing import Dict, Any, List, Optional, Union
 import asyncio
 import httpx
@@ -81,6 +83,98 @@ class AgentNodes:
         
         # 接收 trace 实例
         self.trace = trace
+        
+        # 🆕 工具结果缓存（优化：避免重复调用相同工具）
+        # 格式: {cache_key: (result, timestamp)}
+        self._tool_cache: Dict[str, tuple[ToolResult, float]] = {}
+        self._cache_ttl = 300  # 缓存有效期：5分钟
+        
+        # 🆕 预构建基础系统提示词（优化：避免每次重新生成）
+        self._base_system_prompt = self._build_base_system_prompt()
+    
+    def _build_base_system_prompt(self) -> str:
+        """构建基础系统提示词（静态部分）
+        
+        只在初始化时构建一次，避免每次 LLM 调用都重新生成。
+        
+        Returns:
+            基础系统提示词
+        """
+        return """你是一个专业、友好的 AI 助手，致力于为用户提供准确、有用的信息和帮助。
+
+## 核心能力
+
+你可以：
+1. **回答问题**：基于知识库提供准确的答案
+2. **搜索信息**：使用 web_search 工具搜索最新信息
+3. **执行计算**：使用 calculator 工具进行数学计算
+4. **查询时间**：使用 get_time 工具获取当前时间
+5. **查询天气**：使用 get_weather 工具查询天气信息
+
+## 交互原则
+
+1. **准确性第一**：不确定时明确告知，不编造信息
+2. **结构化回复**：使用 Markdown 格式组织内容
+3. **信息来源**：搜索结果需标注来源和链接
+4. **简洁明了**：避免冗长，直击要点
+5. **友好专业**：保持礼貌，语气自然
+
+## Markdown 格式规范
+
+### 标题层级
+- 使用 `## ` 作为主标题
+- 使用 `### ` 作为小标题
+- **不要使用** `# ` 一级标题
+
+### 列表格式
+- 项目之间**必须有空行**
+- 使用 `-` 或数字列表
+- 重要信息用 **粗体** 突出
+
+### 代码展示
+- 单行代码用 `反引号`
+- 多行代码用 ```语言名称 代码块
+- 必须指定语言以启用语法高亮
+
+### 链接格式
+- 格式：[链接文字](URL)
+- 搜索结果链接必须可点击
+
+## 搜索结果格式
+
+当使用搜索工具时，**必须**按以下格式组织：
+
+```
+## 🔍 搜索结果
+
+根据最新搜索，我为您找到以下信息：
+
+### 1. [结果标题](URL)
+- **来源**：网站名称
+- **关键信息**：简要描述
+
+### 2. [结果标题](URL)
+- **来源**：网站名称
+- **关键信息**：简要描述
+
+## 📝 总结
+
+[对搜索结果的综合分析]
+```
+
+## 工具使用指南
+
+### 何时使用工具
+- 用户询问**最新信息**（新闻、时事）→ 使用 web_search
+- 用户需要**计算**（数学、换算）→ 使用 calculator
+- 用户询问**当前时间/日期** → 使用 get_time
+- 用户询问**天气** → 使用 get_weather
+
+### 工具调用原则
+1. **明确需求**：确认是否真的需要工具
+2. **单次调用**：优先一次性获取所需信息
+3. **结果整合**：将工具结果自然地融入回复
+4. **失败降级**：工具失败时提供替代方案"""
     
     async def _ensure_http_client(self):
         """确保 HTTP 客户端已初始化（懒加载）
@@ -186,6 +280,25 @@ class AgentNodes:
                 state["error_state"] = "empty_input"
                 state["should_continue"] = False
                 state["agent_response"] = "我没有收到任何输入，请说点什么吧。"
+                state["next_action"] = "format_response"
+                return state
+            
+            # ⚡ 快速响应：检测简单问候（优化：跳过 LLM 调用）
+            if self._is_simple_greeting(user_input):
+                self.logger.info(f"🚀 检测到简单问候，快速响应（跳过 LLM）")
+                state["agent_response"] = self._get_greeting_response()
+                state["next_action"] = "format_response"
+                state["current_intent"] = "greeting"
+                
+                # 将用户消息添加到历史
+                user_message = ConversationMessage(
+                    id=f"user_{len(state['messages']) + 1}_{int(datetime.now().timestamp())}",
+                    role=MessageRole.USER,
+                    content=user_input,
+                    metadata={"processed_at": datetime.now().isoformat(), "fast_path": True}
+                )
+                state["messages"].append(user_message)
+                
                 return state
             
             # 将用户消息添加到对话历史
@@ -306,13 +419,30 @@ class AgentNodes:
             
             self.logger.info(f"🔧 第 {current_iteration} 轮工具调用，待执行工具数: {len(state['pending_tool_calls'])}")
             
-            # 逐个执行工具调用
-            for tool_call in state["pending_tool_calls"]:
-                result = await self._execute_tool_call(tool_call)
+            # ⚡ 并行执行所有工具调用（优化：从串行改为并行）
+            tool_tasks = [
+                self._execute_tool_call(tool_call) 
+                for tool_call in state["pending_tool_calls"]
+            ]
+            results = await asyncio.gather(*tool_tasks, return_exceptions=True)
+            
+            # 处理执行结果
+            for tool_call, result in zip(state["pending_tool_calls"], results):
+                # 如果工具执行抛出异常，转换为失败结果
+                if isinstance(result, Exception):
+                    self.logger.error(f"  ❌ 工具 '{tool_call.name}' 执行异常: {str(result)}")
+                    result = ToolResult(
+                        call_id=tool_call.id,
+                        success=False,
+                        result=None,
+                        error=f"工具执行异常: {str(result)}"
+                    )
+                
                 state["tool_results"].append(result)
                 state["tool_calls"].append(tool_call)
                 
-                self.logger.info(f"  ✅ 工具 '{tool_call.name}' 执行完成: {result.success}")
+                status_icon = "✅" if result.success else "❌"
+                self.logger.info(f"  {status_icon} 工具 '{tool_call.name}' 执行完成: {result.success}")
             
             # 清空待处理队列
             state["pending_tool_calls"] = []
@@ -484,422 +614,47 @@ class AgentNodes:
         return messages
     
     def _build_optimized_system_prompt(self, state: AgentState) -> str:
-        """构建优化的系统提示词，提升智能性和效率
+        """构建优化的系统提示词（使用预构建基础 + 动态上下文）
         
         优化策略：
-        1. 明确角色定位和能力边界
-        2. 提供清晰的工具使用指南
-        3. 强调效率和准确性
-        4. 包含任务分解和推理框架
-        5. 根据上下文动态调整提示词
+        1. 使用预构建的基础提示词（静态部分）
+        2. 仅添加动态的上下文信息
+        3. 减少字符串拼接开销
         
         Args:
             state: 当前对话状态
         
         Returns:
-            优化后的系统提示词字符串
+            完整的系统提示词
         """
-        # 基础身份定义
-        base_identity = """# Role Definition
-You are an efficient, intelligent multi-functional AI assistant with the following core capabilities:
-- Natural and fluent conversation in both Chinese and English (respond in user's language)
-- Intelligent tool invocation and task orchestration
-- Structured problem analysis and solving
-- Context understanding and memory retention
-
-# Core Principles
-1. **Efficiency First**: Achieve goals with minimal steps, avoid redundant operations
-2. **Accuracy Above All**: Prioritize information accuracy; clearly inform users when uncertain
-3. **Proactive Thinking**: Understand user intent; proactively clarify requirements when needed
-4. **Smart Tool Usage**: Judiciously determine when tools are needed; avoid unnecessary calls
-
-# 📝 Response Format Standards (CRITICAL - Frontend Rendering Rules)
-**You MUST organize all responses using Markdown format following these exact rules:**
-
-## Basic Markdown Syntax (Frontend-Compatible)
-
-### Headers
-- Use `##` for main sections, `###` for subsections
-- **MUST have space after #**: `## Title` (NOT `##Title`)
-- **MUST have blank line after header**
-
-Example:
-```
-## Main Section
-
-Content starts here...
-
-### Subsection
-
-More content...
-```
-
-### Paragraphs
-- Separate paragraphs with **ONE blank line**
-- Single newlines within a paragraph will NOT create line breaks
-- For explicit line breaks: use `  \n` (two spaces + newline)
-
-### Lists (MOST IMPORTANT)
-**Unordered Lists** (Use `-` for consistency):
-```
-- First item;
-- Second item;
-- Third item.
-```
-
-**Ordered Lists**:
-```
-1. First step;
-2. Second step;
-3. Third step.
-```
-
-**Critical List Rules**:
-1. ✅ **MUST have space after `-` or number**: `- Item` (NOT `-Item`)
-2. ✅ **End items with semicolon `;`** (except last item can use period `.`)
-3. ✅ **Blank line before list**
-4. ✅ **Blank line after list**
-5. ✅ **Each item on separate line**
-6. ❌ **NO nested lists** (keep flat for clarity)
-
-Example:
-```
-如需我:
-
-- 继续追踪并每小时更新最新报道;
-- 汇总不同消息来源的信息;
-- 将信息翻译成英文。
-
-告诉我你想要哪一种。
-```
-
-### Code
-**Inline code**: Wrap with single backticks: `` `code` ``
-
-**Code blocks**: Must specify language for syntax highlighting
-````
-```python
-def example():
-    return "Hello"
-```
-````
-
-**Supported languages**: `python`, `javascript`, `typescript`, `bash`, `json`, `yaml`, `html`, `css`, `sql`
-
-**Critical Code Block Rules**:
-- ✅ Blank line before code block
-- ✅ Blank line after code block
-- ✅ Always specify language (e.g., ` ```python `)
-- ❌ Never nest Markdown inside code blocks
-
-### Links
-- Format: `[Link Text](URL)`
-- Frontend will auto-open in new tab
-- Example: `[Read more](https://example.com)`
-
-### Emphasis
-- **Bold**: `**important text**` for key information
-- *Italic*: `*secondary text*` for emphasis
-- ***Bold + Italic***: `***critical text***` sparingly
-
-### Tables (Use for structured data)
-```
-| Column 1 | Column 2 | Column 3 |
-|----------|----------|----------|
-| Data 1   | Data 2   | Data 3   |
-| Data 4   | Data 5   | Data 6   |
-```
-- Blank line before table
-- Blank line after table
-
-### Horizontal Rule
-Use `---` on its own line with blank lines before/after:
-```
-Content above
-
----
-
-Content below
-```
-
-### Quotes
-```
-> This is a quoted text.
-> Can span multiple lines.
-```
-
-### Emojis
-Use sparingly for visual guidance:
-- 📊 Data/statistics
-- 🔍 Search/investigation
-- 💡 Insight/tip
-- ⚠️ Warning/caution
-- ✅ Success/correct
-- ❌ Error/incorrect
-- 🔗 Link/reference
-
-## ❌ UNSUPPORTED Syntax (DO NOT USE)
-1. ❌ HTML tags: `<div>`, `<span>` (ignored by frontend)
-2. ❌ LaTeX math: `$E=mc^2$` (not rendered)
-3. ❌ Footnotes: `[^1]` (not supported)
-4. ❌ Definition lists (not supported)
-5. ❌ Emoji shortcodes: `:smile:` (use actual emoji: 😊)
-6. ❌ Images: `![alt](url)` (may not display correctly)
-
-## 🔍 SEARCH RESULTS HANDLING (MANDATORY PROTOCOL)
-When you call the `web_search` tool, you **MUST** follow this strict protocol:
-
-### Step 1: Parse Tool Response Structure
-The tool returns JSON with this structure:
-```json
-{
-  "ai_answer": "AI-generated summary (USE THIS FIRST if present!)",
-  "results": [
-    {
-      "title": "Article/page title",
-      "snippet": "Brief content excerpt (50-150 words)",
-      "url": "Source URL",
-      "score": 0.95,  // Relevance score (0.0-1.0)
-      "published_date": "2025-01-15"  // Optional
-    }
-  ],
-  "total_results": 8
-}
-```
-
-### Step 2: Structure Your Response (REQUIRED FORMAT)
-```markdown
-## � Search Results: [Topic]
-
-### �📊 Executive Summary
-[If ai_answer exists and is valuable, present it here]
-[If no ai_answer, synthesize key findings from top 3 results in 2-3 sentences]
-
-### 📰 Detailed Findings
-
-#### 1. **[Title from result[0]]**
-- 📅 **Published**: [published_date or "Recent"]
-- 📝 **Key Points**: [Extract core information from snippet, 50-100 words]
-- 🔗 **Source**: [Title](URL) ← Must be clickable!
-
-#### 2. **[Title from result[1]]**
-- 📅 **Published**: [published_date or "Recent"]
-- 📝 **Key Points**: [Extract core information from snippet]
-- 🔗 **Source**: [Title](URL)
-
-[Continue for top 3-5 results based on score]
-
----
-
-💡 **Key Insight**: [One-sentence conclusion, trend observation, or actionable recommendation]
-```
-
-### Step 3: What You MUST DO ✅
-- ✅ **Extract ai_answer**: If present, use it as the executive summary
-- ✅ **Parse all results**: Don't just say "Found X results"
-- ✅ **Show actual content**: Display title + snippet + url for each result
-- ✅ **Clickable links**: Format as `[Title](URL)` so users can click
-- ✅ **Sort by relevance**: Prioritize high-score results (typically 0.8+)
-- ✅ **Include dates**: Show published_date when available for news/time-sensitive content
-- ✅ **Synthesize**: Add value by summarizing patterns or key insights
-- ✅ **Structured format**: Use headers, lists, and separators for visual clarity
-
-### Step 4: What You MUST NOT DO ❌
-- ❌ **Never** just return "Found 8 results about..." without showing content
-- ❌ **Never** output raw JSON or tool parameters like `{"query": "...", "num_results": 8}`
-- ❌ **Never** omit the snippet content (the actual information)
-- ❌ **Never** ignore the ai_answer field when it's present
-- ❌ **Never** provide URLs without making them clickable
-- ❌ **Never** use plain paragraphs for search results (always use structured format)
-
-### Example: GOOD vs BAD Response
-
-**❌ BAD (What NOT to do):**
-```
-I found 8 results about Trump visiting Japan.
-```
-
-**✅ GOOD (What to do):**
-```
-## 🔍 Search Results: Trump's Japan Visit 2025
-
-### 📊 Executive Summary
-Former President Trump confirmed plans to visit Japan in spring 2025, focusing on trade and security cooperation discussions with Japanese officials.
-
-### 📰 Detailed Findings
-
-#### 1. **Trump Confirms 2025 Japan Visit**
-- 📅 **Published**: 2025-01-15
-- 📝 **Key Points**: Trump announced via social media that he will visit Japan in April 2025 to discuss bilateral trade agreements and regional security concerns.
-- 🔗 **Source**: [The Japan Times](https://example.com/article1)
-
-#### 2. **US-Japan Trade Talks Accelerate**
-- 📅 **Published**: 2025-01-10
-- 📝 **Key Points**: Japanese officials preparing for high-level negotiations during Trump's visit, with focus on automotive and agricultural sectors.
-- 🔗 **Source**: [Reuters](https://example.com/article2)
-
----
-
-💡 **Key Insight**: This will be Trump's first visit to Japan since leaving office, signaling renewed focus on US-Japan alliance.
-```
-
-# 🎯 Response Quality Standards for Other Scenarios
-
-## For Code-Related Queries
-- Always specify language in code blocks: ` ```python `, ` ```javascript `, etc.
-- Add comments to explain complex logic
-- Provide context before and after code snippets
-
-## For Data/Numbers
-- Use tables when comparing multiple items:
-  ```
-  | Item | Value | Change |
-  |------|-------|--------|
-  | A    | 100   | +5%    |
-  ```
-- Use charts/graphs descriptions for trends
-- Highlight key numbers with **bold**
-
-## For Step-by-Step Instructions
-1. **Number each step** for clarity
-2. **Bold the action** in each step
-3. **Provide expected outcomes** after key steps
-4. **Include troubleshooting** for common issues
-
-## Language Adaptation
-- **Respond in the user's language**: Chinese query → Chinese response, English query → English response
-- **Keep technical terms**: Use original English terms in Chinese responses when appropriate (e.g., "API", "JSON")
-- **Maintain Markdown**: Use Markdown structure regardless of language"""
-
-        # 获取可用工具列表
-        available_tools = self._format_available_tools()
+        # 使用预构建的基础提示词
+        prompt_parts = [self._base_system_prompt]
         
-        tools_guide = f"""
-
-# 🛠️ Available Tools
-{available_tools}
-
-# Tool Usage Strategy
-
-## When to Use Tools ✅
-- **Real-time information needed** (weather, time, search) → MUST use tool
-- **Complex calculations or data processing** → Use calculator tool
-- **User explicitly requests specific action** → Use corresponding tool
-- **Information may have changed recently** → Use search tool
-- **Verification of facts/statistics needed** → Use search tool
-
-## When NOT to Use Tools ❌
-- **General knowledge or common sense questions** → Answer directly
-- **Simple mental math or logical reasoning** → Answer directly
-- **Creative or opinion-based requests** → Answer directly
-- **Conversational chitchat** → Answer directly
-
-## Tool Invocation Principles
-1. **One tool at a time**: Only call tools that are genuinely needed for the current query
-2. **Prefer single tool**: Use the most appropriate single tool rather than multiple tools
-3. **Quality over quantity**: Better to make one precise tool call than multiple vague ones
-4. **Always process results**: After tool execution, ALWAYS synthesize and present results properly
-   - For search: Follow the mandatory search results protocol above
-   - For calculator: Show both the expression and result
-   - For time: Present in user-friendly format with timezone context
-   - For weather: Provide actionable insights (e.g., "Bring an umbrella")
-
-## Tool Result Processing (CRITICAL)
-**After any tool call, you MUST:**
-1. ✅ **Parse the tool response**: Extract data, ai_answer, or error messages
-2. ✅ **Format appropriately**: Use Markdown structure (headers, lists, links)
-3. ✅ **Add context**: Explain what the results mean, not just what they are
-4. ✅ **Cite sources**: For search results, always provide clickable URLs
-5. ✅ **Synthesize insight**: Don't just relay data; add interpretation or recommendations
-
-**Common mistake to avoid:**
-❌ Returning tool parameters instead of tool results
-❌ Example: Saying `{{"query": "Trump Japan", "num_results": 8}}` instead of actual search findings"""
-
-        # 任务处理框架
-        task_framework = """
-
-# 🎯 Task Processing Framework
-For complex requests, follow this cognitive workflow:
-
-1. **Understand** 🧠
-   - Accurately identify user's true needs and intent
-   - Recognize implicit requirements (e.g., "latest news" implies web_search)
-   - Determine response language based on user's query language
-
-2. **Plan** 📋
-   - Determine if tools are needed
-   - Select the most appropriate tool(s)
-   - For search queries: Formulate precise search terms
-
-3. **Execute** ⚡
-   - Efficiently call necessary tools to gather information
-   - Wait for complete tool results before proceeding
-
-4. **Synthesize** 🔄
-   - Integrate tool results with your knowledge
-   - Structure information using proper Markdown format
-   - Add analysis, context, or recommendations beyond raw data
-
-5. **Validate** ✅
-   - Ensure response fully addresses user's question
-   - Check that all sources are properly cited
-   - Verify response follows Markdown formatting standards
-
-# Response Quality Standards
-
-## ✅ Excellent Response Should:
-- **Directly address** the user's question without meandering
-- **Well-structured** with clear hierarchy (headers, lists, sections)
-- **Information-accurate** with reliable sources cited
-- **Tone-appropriate**: Friendly yet professional
-- **Actionable**: Provide insights, not just data
-- **Visually clear**: Proper use of Markdown formatting
-
-## ❌ Avoid:
-- **Excessive verbosity** or repetitive explanations
-- **Unnecessary apologies** or overly humble expressions (e.g., "I apologize but..." when not needed)
-- **Vague responses** without concrete information
-- **Tool misuse**: Calling irrelevant tools or not processing tool results
-- **Format violations**: Plain text walls instead of structured Markdown
-- **Incomplete information**: Stopping at "Found X results" without showing them
-
-# Special Handling for Common Query Types
-
-## News/Current Events Queries
-- **Always use** web_search tool
-- **Prioritize** recent results (check published_date)
-- **Include** multiple perspectives if available
-- **Format**: Use the mandatory search results protocol
-
-## "How to" / Tutorial Queries
-- **Structure**: Clear numbered steps
-- **Include**: Expected outcomes for each step
-- **Add**: Troubleshooting tips for common issues
-- **Format**: Combine headers, ordered lists, and code blocks
-
-## Technical/Code Queries
-- **Use**: Proper syntax highlighting in code blocks
-- **Provide**: Explanation before/after code
-- **Include**: Comments within code for complex logic
-- **Format**: ` ```language ` with appropriate language tag
-
-## Data/Statistics Queries
-- **Present**: Tables for comparisons
-- **Highlight**: Key numbers with **bold**
-- **Visualize**: Describe trends or patterns
-- **Cite**: Always mention data sources with links"""
-
-        # 上下文感知优化
-        context_optimization = self._build_context_aware_addition(state)
+        # 添加动态上下文信息
+        context_additions = []
         
-        # 组合完整提示词
-        full_prompt = base_identity + tools_guide + task_framework
+        # 如果有工具调用历史，添加提示
+        if state.get("tool_calls"):
+            tool_count = len(state["tool_calls"])
+            context_additions.append(f"\n## 当前上下文\n\n- 已执行 {tool_count} 次工具调用")
         
-        if context_optimization:
-            full_prompt += "\n\n" + context_optimization
+        # 如果用户有明确意图，添加提示
+        current_intent = state.get("current_intent")
+        if current_intent and current_intent != "general":
+            intent_hints = {
+                "search": "用户需要搜索信息，优先使用 web_search 工具",
+                "calculation": "用户需要计算，使用 calculator 工具",
+                "time_query": "用户询问时间，使用 get_time 工具",
+                "weather": "用户询问天气，使用 get_weather 工具"
+            }
+            if current_intent in intent_hints:
+                context_additions.append(f"- {intent_hints[current_intent]}")
         
-        return full_prompt
+        # 合并所有部分
+        if context_additions:
+            prompt_parts.append("\n".join(context_additions))
+        
+        return "\n\n".join(prompt_parts)
     
     def _get_tools_schema(self) -> List[Dict]:
         """获取工具的 OpenAI Function Calling 格式定义
@@ -1691,8 +1446,128 @@ User is asking about current time or date:
         
         return tool_calls
     
+    def _is_simple_greeting(self, text: str) -> bool:
+        """检测是否为简单问候语
+        
+        用于快速响应优化，跳过 LLM 调用以降低延迟。
+        
+        Args:
+            text: 用户输入文本
+            
+        Returns:
+            是否为简单问候
+        """
+        text_lower = text.lower().strip()
+        
+        # 简单问候关键词列表
+        simple_greetings = [
+            # 英文
+            "hi", "hello", "hey", "hola", "yo",
+            # 中文
+            "你好", "您好", "嗨", "哈喽", "嘿",
+            "早", "早上好", "中午好", "下午好", "晚上好",
+            "晚安", "hi~", "hello~", "嗨~"
+        ]
+        
+        # 精确匹配（去除标点符号）
+        clean_text = text_lower.strip("!！?？.。,，~")
+        return clean_text in simple_greetings
+    
+    def _get_greeting_response(self) -> str:
+        """获取问候响应
+        
+        Returns:
+            随机问候响应
+        """
+        import random
+        
+        responses = [
+            "你好！很高兴见到你！有什么我可以帮助的吗？😊",
+            "嗨！我是你的 AI 助手，随时为你服务！",
+            "您好！请问有什么可以帮到您的吗？",
+            "Hi！很高兴能帮到你！✨",
+            "你好呀！有什么问题尽管问我～"
+        ]
+        
+        return random.choice(responses)
+    
     async def _execute_tool_call(self, tool_call: ToolCall) -> ToolResult:
-        """Execute a tool call using MCP tool registry."""
+        """执行工具调用（带缓存优化）
+        
+        检查缓存以避免重复执行相同的工具调用，提升性能并降低外部 API 费用。
+        
+        Args:
+            tool_call: 工具调用对象
+            
+        Returns:
+            工具执行结果
+        """
+        try:
+            # 🆕 缓存优化：检查是否可以使用缓存结果
+            cache_key = self._generate_tool_cache_key(tool_call)
+            
+            if cache_key in self._tool_cache:
+                cached_result, cached_time = self._tool_cache[cache_key]
+                cache_age = time.time() - cached_time
+                
+                # 检查缓存是否仍然有效
+                if cache_age < self._cache_ttl:
+                    self.logger.info(f"🎯 使用缓存的工具结果: {tool_call.name} (缓存 {int(cache_age)}秒前)")
+                    # 创建新的 ToolResult 对象，使用当前的 call_id
+                    return ToolResult(
+                        call_id=tool_call.id,
+                        success=cached_result.success,
+                        result=cached_result.result,
+                        error=cached_result.error
+                    )
+                else:
+                    # 缓存过期，删除
+                    del self._tool_cache[cache_key]
+                    self.logger.debug(f"缓存已过期，重新执行工具: {tool_call.name}")
+            
+            # 执行工具调用（无缓存或缓存过期）
+            result = await self._execute_tool_call_uncached(tool_call)
+            
+            # 🆕 缓存成功的结果
+            if result.success:
+                self._tool_cache[cache_key] = (result, time.time())
+                self.logger.debug(f"工具结果已缓存: {tool_call.name}")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Tool execution error: {e}", exc_info=True)
+            return ToolResult(
+                call_id=tool_call.id,
+                success=False,
+                result=None,
+                error=str(e)
+            )
+    
+    def _generate_tool_cache_key(self, tool_call: ToolCall) -> str:
+        """生成工具调用的缓存键
+        
+        基于工具名称和参数生成唯一的缓存键。
+        
+        Args:
+            tool_call: 工具调用对象
+            
+        Returns:
+            缓存键字符串
+        """
+        # 将参数排序后序列化，确保相同参数生成相同的键
+        args_str = json.dumps(tool_call.arguments, sort_keys=True, ensure_ascii=False)
+        return f"{tool_call.name}:{args_str}"
+    
+    async def _execute_tool_call_uncached(self, tool_call: ToolCall) -> ToolResult:
+        """执行工具调用（无缓存，实际执行）
+        
+        Args:
+            tool_call: 工具调用对象
+            
+        Returns:
+            工具执行结果
+        """
         try:
             # Try to use MCP tool registry
             try:
@@ -1755,7 +1630,7 @@ User is asking about current time or date:
             )
             
         except Exception as e:
-            self.logger.error(f"Tool execution error: {e}", exc_info=True)
+            self.logger.error(f"Tool execution error in uncached call: {e}", exc_info=True)
             return ToolResult(
                 call_id=tool_call.id,
                 success=False,
