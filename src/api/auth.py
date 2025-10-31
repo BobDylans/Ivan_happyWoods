@@ -45,12 +45,14 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         
         # Default exempt paths
         self.exempt_paths = exempt_paths or [
+            "/",  # 根路径
             "/health",
             "/docs",
             "/openapi.json",
             "/redoc",
             "/favicon.ico",
-            "/api/v1/health"  # Health check 不需要认证
+            "/api/v1/health",  # Health check 不需要认证
+            "/api/v1/info"  # API 信息端点
         ]
         
         if self.enabled:

@@ -140,27 +140,34 @@ class VoiceAgent:
         Get appropriate checkpointer based on configuration.
         
         Returns:
-            Checkpointer instance (MemorySaver or PostgreSQLCheckpointer)
+            Checkpointer instance (PostgreSQLCheckpointer or None)
         """
-        # Check if database persistence is enabled
-        if hasattr(self.config, 'database') and self.config.database.enabled:
-            # Check if session storage is set to database
-            if self.config.session.storage_type == "database":
-                try:
-                    from database import PostgreSQLCheckpointer
-                    # 调用其他包里面写好的获取数据库绘画的函数
-                    self.logger.info("Using PostgreSQL checkpointer for persistence")
-                    return PostgreSQLCheckpointer()
-                except Exception as e:
-                    self.logger.warning(
-                        f"Failed to initialize PostgreSQL checkpointer: {e}. "
-                        f"Falling back to memory."
-                    )
-        
-        # Default to memory saver
-        self.logger.info("Using in-memory checkpointer")
-        # 这样就能获取到一个持久化工具
-        return MemorySaver()
+        # 🔧 Phase 2.3: 优先使用 PostgreSQL checkpointer 以支持异步操作
+        try:
+            from database.checkpointer import PostgreSQLCheckpointer
+            from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+            
+            # 🔧 方案 C: 直接创建数据库连接（使用正确的密码：changeme123）
+            DATABASE_URL = "postgresql+asyncpg://agent_user:changeme123@127.0.0.1:5432/voice_agent"
+            
+            engine = create_async_engine(DATABASE_URL, echo=False, pool_size=5, max_overflow=10)
+            session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            
+            # 使用 lambda 包装 session_factory 以匹配预期接口
+            def get_session():
+                return session_factory()
+            
+            self.logger.info("✅ Using PostgreSQL checkpointer for async persistence")
+            return PostgreSQLCheckpointer(session_factory=get_session)
+            
+        except Exception as e:
+            self.logger.warning(
+                f"⚠️ Failed to initialize PostgreSQL checkpointer: {e}. "
+                f"Falling back to None (no state persistence)."
+            )
+            # MemorySaver 不支持异步，暂时返回 None
+            self.logger.info("Using no checkpointer (state won't persist across requests)")
+            return None
     
     def _route_after_input(self, state: AgentState) -> str:
         """ 输入 后的路由决策。"""
@@ -310,7 +317,10 @@ class VoiceAgent:
             return response
             
         except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
             self.logger.error(f"处理消息时出错: {e}")
+            self.logger.error(f"完整错误堆栈:\n{error_trace}")
             return {
                 "success": False,
                 "response": "抱歉,处理您的请求时遇到了错误。",

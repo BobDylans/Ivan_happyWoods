@@ -83,20 +83,20 @@ async def check_dependencies():
 
 def main():
     """Main entry point."""
-    print("🚀 Starting Voice Agent API Server...")
+    print("Starting Voice Agent API Server...")
     print("=" * 50)
     
     setup_logging()
     
     # Check dependencies
     if not asyncio.run(check_dependencies()):
-        print("❌ Dependency check failed. Please install required packages.")
+        print("Dependency check failed. Please install required packages.")
         sys.exit(1)
     
-    print("✅ All dependencies OK")
-    print("🌐 Starting server on http://127.0.0.1:8000")
-    print("📚 API Documentation: http://127.0.0.1:8000/docs")
-    print("🔍 Health Check: http://127.0.0.1:8000/api/v1/health")
+    print("All dependencies OK")
+    print("Starting server on http://127.0.0.1:8000")
+    print("API Documentation: http://127.0.0.1:8000/docs")
+    print("Health Check: http://127.0.0.1:8000/api/v1/health")
     print("=" * 50)
     
     try:

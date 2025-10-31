@@ -162,8 +162,8 @@ class MessageRepository:
         )
         
         messages = list(result.scalars().all())
-        # Reverse to get chronological order
-        return list(reversed(messages))
+        # Return as-is: most recent first (descending order)
+        return messages
     
     async def delete_old_messages(
         self,

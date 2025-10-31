@@ -50,7 +50,7 @@ class SessionRepository:
             session_id=session_id,
             user_id=user_id,
             status="ACTIVE",
-            metadata=metadata or {}
+            meta_data=metadata or {}  # 修正：使用 meta_data 字段名
         )
         
         self.session.add(new_session)
@@ -93,6 +93,29 @@ class SessionRepository:
         updated = result.rowcount > 0
         if updated:
             logger.debug(f"Updated activity for session: {session_id}")
+        
+        return updated
+    
+    async def update_status(self, session_id: str, status: str) -> bool:
+        """
+        Update session status.
+        
+        Args:
+            session_id: Session identifier
+            status: New status (ACTIVE, PAUSED, TERMINATED)
+            
+        Returns:
+            True if updated, False if session not found
+        """
+        result = await self.session.execute(
+            update(Session)
+            .where(Session.session_id == session_id)
+            .values(status=status, last_activity=datetime.utcnow())
+        )
+        
+        updated = result.rowcount > 0
+        if updated:
+            logger.debug(f"Updated status for session {session_id} to {status}")
         
         return updated
     
@@ -193,6 +216,15 @@ class SessionRepository:
         
         result = await self.session.execute(query)
         return result.scalar_one()
+    
+    async def get_active_sessions_count(self) -> int:
+        """
+        Get count of active sessions.
+        
+        Returns:
+            Number of active sessions
+        """
+        return await self.count_sessions(status="ACTIVE")
     
     async def delete_session(self, session_id: str) -> bool:
         """

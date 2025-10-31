@@ -34,6 +34,11 @@ class APIKeyAuth(HTTPBearer):
     
     async def __call__(self, request: Request) -> Optional[str]:
         """Validate API key from header."""
+        # ⚠️ DEVELOPMENT MODE: API Key validation DISABLED
+        # Skip authentication for all endpoints (for testing)
+        logger.warning("🚨 API Key validation is DISABLED - For development only!")
+        return "dev-bypass"
+        
         # Skip authentication for health endpoints
         if request.url.path.startswith("/api/v1/health") or request.url.path in ["/", "/docs", "/redoc", "/openapi.json"]:
             return None

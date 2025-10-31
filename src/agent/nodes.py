@@ -120,6 +120,11 @@ class AgentNodes:
             >>> self._build_llm_url()
             "https://api.openai-proxy.org/v1/chat/completions"
         """
+        # 🔍 调试日志 - 显示原始配置
+        self.logger.info(f"🔧 配置检查 - base_url: {self.config.llm.base_url}")
+        self.logger.info(f"🔧 配置检查 - provider: {self.config.llm.provider}")
+        self.logger.info(f"🔧 配置检查 - model: {self.config.llm.models.default}")
+        
         base = self.config.llm.base_url.rstrip('/')
         
         # 仅在 base_url 不包含 /v1 时添加
@@ -127,6 +132,7 @@ class AgentNodes:
             base = base + '/v1'
         
         url = f"{base}/{endpoint}"
+        self.logger.info(f"🔧 最终 URL: {url}")
         return url
     
     async def cleanup(self):
@@ -313,6 +319,13 @@ class AgentNodes:
                 state["tool_calls"].append(tool_call)
                 
                 self.logger.info(f"  ✅ 工具 '{tool_call.name}' 执行完成: {result.success}")
+                
+                # ✅ 保存 tool_call 到数据库
+                await self._save_tool_call_to_database(
+                    session_id=state["session_id"],
+                    tool_call=tool_call,
+                    result=result
+                )
             
             # 清空待处理队列
             state["pending_tool_calls"] = []
@@ -426,7 +439,7 @@ class AgentNodes:
         else:
             return "general_conversation"
     
-    def _prepare_llm_messages(self, state: AgentState, external_history: List[Dict] = None) -> List[Dict[str, str]]:
+    def _prepare_llm_messages(self, state: AgentState, external_history: Optional[List[Dict]] = None) -> List[Dict[str, str]]:
         """准备 LLM API 调用的消息列表
         
         包含优化的系统提示词和历史对话。优先使用外部传入的历史记录。
@@ -1762,3 +1775,70 @@ User is asking about current time or date:
                 result=None,
                 error=str(e)
             )
+    
+    async def _save_tool_call_to_database(
+        self,
+        session_id: str,
+        tool_call: ToolCall,
+        result: ToolResult
+    ) -> None:
+        """
+        保存工具调用记录到数据库
+        
+        Args:
+            session_id: 会话ID
+            tool_call: 工具调用对象
+            result: 工具执行结果
+        """
+        try:
+            # ✅ 使用全局数据库引擎（从 main.py 的 app.state 获取）
+            from database.repositories import ToolCallRepository
+            from sqlalchemy.ext.asyncio import AsyncSession
+            
+            # 尝试从全局获取数据库引擎
+            try:
+                from api.main import app
+                if hasattr(app.state, 'db_engine'):
+                    db_engine = app.state.db_engine
+                else:
+                    self.logger.warning("⚠️ app.state.db_engine 不存在，跳过保存工具调用")
+                    return
+            except:
+                self.logger.warning("⚠️ 无法获取全局数据库引擎，跳过保存工具调用")
+                return
+            
+            # 创建新的数据库会话
+            async with AsyncSession(db_engine) as db_session:
+                tool_call_repo = ToolCallRepository(db_session)
+                
+                # 提取执行时间（如果有）
+                execution_time_ms = None
+                result_data = {}
+                
+                if result.success and result.result:
+                    try:
+                        result_data = {"data": result.result, "success": True}
+                    except:
+                        result_data = {"data": str(result.result), "success": True}
+                else:
+                    result_data = {"success": False, "error": result.error}
+                
+                # 保存到数据库
+                await tool_call_repo.save_tool_call(
+                    session_id=session_id,
+                    tool_name=tool_call.name,
+                    parameters=tool_call.arguments,
+                    result=result_data,
+                    execution_time_ms=execution_time_ms
+                )
+                
+                # ✅ 提交事务
+                await db_session.commit()
+                
+                self.logger.info(f"💾 工具调用已保存到数据库: {tool_call.name} (session: {session_id})")
+        
+        except Exception as e:
+            self.logger.error(f"❌ 保存工具调用到数据库失败: {e}", exc_info=True)
+            self.logger.error(f"   Session ID: {session_id}")
+            self.logger.error(f"   Tool Name: {tool_call.name}")
+            # 不抛出异常，避免影响正常流程

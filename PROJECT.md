@@ -1,10 +1,10 @@
 # Ivan_HappyWoods - Voice-Based AI Agent Interaction System
 
-> **Project Status**: Phase 2F Complete (完整功能对话系统 ✅)  
-> **Last Updated**: 2025-10-17  
-> **Version**: 0.2.6-stable
+> **Project Status**: Phase 3A Complete (PostgreSQL 数据库集成完成 ✅)  
+> **Last Updated**: 2025-10-31  
+> **Version**: 0.3.0-beta
 >
-> 📖 **新手？** 先阅读 [QUICK_START.md](QUICK_START.md) - 15分钟快速上手指南
+> 📖 **新手？** 先阅读本文档的"项目概述"和"快速导航"部分
 
 ---
 
@@ -42,6 +42,7 @@ Ivan_HappyWoods 是一个**基于语音的 AI 代理交互系统**,旨在提供:
 - 🔧 **工具集成能力**: 通过 MCP 协议集成外部工具
 - 📡 **实时流式响应**: SSE 和 WebSocket 双模式流式传输
 - 🌐 **多模型支持**: 灵活的 LLM 模型选择策略
+- 💾 **持久化存储**: PostgreSQL 数据库存储会话和状态
 
 ### 🎨 核心价值主张
 
@@ -60,10 +61,20 @@ Phase 2C (Conversation API)      ███████████████�
 Phase 2D (Code Optimization)     ████████████████████ 100% ✅
 Phase 2E (MCP Tools)             ████████████████████ 100% ✅
 Phase 2F (AI Features)           ████████████████████ 100% ✅
-Phase 3A (PostgreSQL Database)   ░░░░░░░░░░░░░░░░░░░░   0% 📋
+Phase 3A (PostgreSQL Database)   ████████████████████ 100% ✅
 Phase 3B (RAG Knowledge Base)    ░░░░░░░░░░░░░░░░░░░░   0% 📋
 Phase 3C (n8n Integration)       ░░░░░░░░░░░░░░░░░░░░   0% 📋
 ```
+
+**Phase 3A 完成内容** (2025-10-30 ~ 2025-10-31):
+- ✅ PostgreSQL 数据库完全集成
+- ✅ SQLAlchemy async ORM 模型 (User, Session, Message, ToolCall)
+- ✅ PostgreSQLCheckpointer 实现 LangGraph 状态持久化
+- ✅ HybridSessionManager 实现内存+数据库混合存储
+- ✅ Database repositories CRUD 操作
+- ✅ models.py 和 models_v2.py 合并 (-184 行重复代码)
+- ✅ mypy 类型检查配置 (修复 10 个基础错误)
+- ✅ VS Code Pylance 配置优化
 
 **Phase 2F 完成内容** (2025-10-17):
 - ✅ 工具调用功能（7 个 MCP 工具）
@@ -196,10 +207,13 @@ Phase 3C (n8n Integration)       ░░░░░░░░░░░░░░░�
 
 | 技术 | 版本 | 用途 | 状态 |
 |------|------|------|------|
-| **Python** | 3.11+ | 主要开发语言 | ✅ |
-| **FastAPI** | 0.100+ | Web 框架和 API 网关 | ✅ |
+| **Python** | 3.11.9 | 主要开发语言 | ✅ |
+| **FastAPI** | 0.120.2 | Web 框架和 API 网关 | ✅ |
 | **LangGraph** | Latest | 对话流程编排 | ✅ |
 | **Pydantic** | v2 | 数据验证和配置管理 | ✅ |
+| **SQLAlchemy** | 2.0+ | 异步 ORM | ✅ |
+| **PostgreSQL** | 14+ | 关系型数据库 | ✅ |
+| **Alembic** | Latest | 数据库迁移 | ✅ |
 | **httpx** | Latest | 异步 HTTP 客户端 | ✅ |
 | **uvicorn** | Latest | ASGI 服务器 | ✅ |
 
@@ -210,16 +224,17 @@ Phase 3C (n8n Integration)       ░░░░░░░░░░░░░░░�
 | **LLM API** | OpenAI-Compatible | 语言模型推理 | ✅ |
 | **STT** | 科大讯飞 (iFlytek) | 语音识别 | ✅ |
 | **TTS** | 科大讯飞 (iFlytek) | 语音合成 | ✅ |
-| **MCP Tools** | Custom | 工具集成 | ⏳ |
+| **Search** | Tavily API | 网络搜索工具 | ✅ |
+| **MCP Tools** | Custom | 工具集成 (7 tools) | ✅ |
 
 ### 开发工具
 
 | 工具 | 用途 | 配置文件 |
 |------|------|----------|
 | **pytest** | 单元/集成测试 | `pytest.ini` |
-| **ruff** | 代码检查 | `.ruff.toml` (planned) |
-| **black** | 代码格式化 | `pyproject.toml` (planned) |
-| **mypy** | 类型检查 | `mypy.ini` (planned) |
+| **mypy** | 类型检查 | `mypy.ini` |
+| **Pylance** | VS Code 类型检查 | `.vscode/settings.json` |
+| **Alembic** | 数据库迁移 | `alembic.ini` |
 
 ---
 
@@ -230,84 +245,118 @@ Phase 3C (n8n Integration)       ░░░░░░░░░░░░░░░�
 ```
 Ivan_HappyWoods/
 ├── .github/
-│   └── copilot-instructions.md    # Copilot 开发指引
+│   └── copilot-instructions.md    # Copilot 开发指引 (UPDATED)
 │
 ├── specs/                          # 📐 功能规格文档
 │   └── 001-voice-interaction-system/
 │       ├── spec.md                 # 功能规格
 │       ├── plan.md                 # 实施计划
 │       ├── tasks.md                # 任务分解
-│       ├── progress.md             # 进度跟踪 (NEW)
-│       ├── architecture.md         # 架构文档 (NEW)
+│       ├── progress.md             # 进度跟踪 (UPDATED)
+│       ├── architecture.md         # 架构文档
 │       ├── quickstart.md           # 快速开始
 │       ├── data-model.md           # 数据模型
 │       └── research.md             # 技术调研
 │
 ├── docs/                           # 📚 项目文档
 │   ├── achievements/               # 开发成果
-│   │   ├── INDEX.md               # 成果索引
+│   │   ├── INDEX.md               # 成果索引 (UPDATED)
 │   │   ├── phase1/                # Phase 1 成果
 │   │   ├── phase2/                # Phase 2 成果
 │   │   ├── optimizations/         # 优化报告
 │   │   └── reports/               # 修复报告
+│   ├── CODE_MERGE_REPORT_2025-10-31.md  # 代码合并报告 (NEW)
+│   ├── CODE_REVIEW_2025-10-31.md        # 代码审查报告 (NEW)
+│   ├── VSCODE_TYPE_CHECK_CONFIG.md      # 类型检查配置 (NEW)
+│   ├── phase2-database-integration-report.md  # 数据库集成报告
 │   ├── api/                       # API 文档 (planned)
 │   ├── architecture/              # 架构文档 (planned)
 │   └── deployment/                # 部署指南 (planned)
 │
 ├── src/                            # 💻 源代码
 │   ├── agent/                      # 🤖 LangGraph 代理核心
-│   │   ├── graph.py               # 工作流图定义
-│   │   ├── nodes.py               # 节点实现
+│   │   ├── graph.py               # 工作流图定义 (with PostgreSQL)
+│   │   ├── nodes.py               # 节点实现 (~2000 lines)
 │   │   └── state.py               # 状态管理
 │   │
 │   ├── api/                        # 🌐 FastAPI 路由层
-│   │   ├── main.py                # 应用入口
-│   │   ├── conversation_routes.py # 对话端点
+│   │   ├── main.py                # 应用入口 (with database)
+│   │   ├── conversation_routes.py # 对话端点 (async)
 │   │   ├── voice_routes.py        # 语音端点
-│   │   ├── models.py              # Pydantic 模型
+│   │   ├── mcp_routes.py          # MCP 工具端点 (NEW)
+│   │   ├── models.py              # Pydantic 模型 (merged, v2)
 │   │   ├── middleware.py          # 中间件
 │   │   ├── auth.py                # 认证逻辑
 │   │   ├── event_utils.py         # 事件工具
 │   │   └── stream_manager.py      # 流管理器
 │   │
-│   ├── services/                   # 🔧 业务服务层
+│   ├── database/                   # 💾 数据库层 (NEW)
+│   │   ├── models.py              # SQLAlchemy ORM 模型
+│   │   ├── checkpointer.py        # PostgreSQLCheckpointer
+│   │   ├── connection.py          # 异步数据库连接
+│   │   └── repositories/          # CRUD 仓储
+│   │       ├── conversation_repository.py
+│   │       ├── session_repository.py
+│   │       ├── message_repository.py
+│   │       └── tool_call_repository.py
+│   │
+│   ├── mcp/                        # � MCP 工具集成
+│   │   ├── base.py                # 工具基类
+│   │   ├── tools.py               # 基础工具 (4 tools)
+│   │   ├── voice_tools.py         # 语音工具 (3 tools)
+│   │   ├── registry.py            # 工具注册表
+│   │   └── init_tools.py          # 工具初始化
+│   │
+│   ├── services/                   # �🔧 业务服务层
 │   │   ├── conversation_service.py # 对话服务
 │   │   └── voice/                 # 语音服务
 │   │       ├── stt_service.py     # STT 实现
 │   │       └── tts_service.py     # TTS 实现
 │   │
 │   ├── config/                     # ⚙️ 配置管理
-│   │   ├── models.py              # 配置模型
+│   │   ├── models.py              # 配置模型 (with database config)
 │   │   └── settings.py            # 配置加载
 │   │
-│   ├── mcp/                        # 🔌 MCP 工具集成 (Future)
-│   │   └── (planned)
-│   │
 │   └── utils/                      # 🛠️ 工具函数
-│       └── llm_compat.py          # LLM 兼容层
+│       ├── llm_compat.py          # LLM 兼容层
+│       └── hybrid_session_manager.py  # 混合会话管理 (NEW)
 │
 ├── tests/                          # 🧪 测试代码
 │   ├── unit/                      # 单元测试
 │   ├── integration/               # 集成测试
 │   └── contract/                  # 契约测试 (planned)
 │
+├── migrations/                     # 📋 数据库迁移 (Alembic)
+│   ├── versions/                  # 迁移版本
+│   ├── env.py                     # Alembic 环境
+│   └── script.py.mako             # 迁移脚本模板
+│
+├── scripts/                        # 🔨 脚本工具
+│   ├── init_db.py                 # 数据库初始化
+│   └── init_db.sql                # SQL 初始化脚本
+│
 ├── config/                         # 📋 配置文件
-│   ├── development.yaml           # 开发配置 (planned)
-│   └── production.yaml            # 生产配置 (planned)
+│   ├── development.yaml           # 开发配置
+│   ├── production.yaml            # 生产配置
+│   └── testing.yaml               # 测试配置
+│
+├── .vscode/                        # 🔧 VS Code 配置 (NEW)
+│   └── settings.json              # Pylance 类型检查配置
 │
 ├── logs/                           # 📝 日志文件
 ├── test_audio/                     # 🎵 测试音频
 │
 ├── .env                            # 🔐 环境变量 (不提交)
 ├── .env.example                    # 环境变量模板
-├── requirements.txt                # Python 依赖
+├── requirements.txt                # Python 依赖 (updated)
 ├── pytest.ini                      # pytest 配置
+├── mypy.ini                        # mypy 配置 (NEW)
+├── alembic.ini                     # Alembic 配置
 ├── start_server.py                 # 服务启动脚本
 ├── test_conversation.py            # 对话测试脚本
 │
-├── PROJECT.md                      # 本文件 - 项目总览
-├── DEVELOPMENT.md                  # 开发者指南 (NEW)
-├── CHANGELOG.md                    # 变更日志 (NEW)
+├── PROJECT.md                      # 本文件 - 项目总览 (UPDATED)
+├── CHANGELOG.md                    # 变更日志 (TO UPDATE)
 └── README.md                       # 项目说明 (planned)
 ```
 

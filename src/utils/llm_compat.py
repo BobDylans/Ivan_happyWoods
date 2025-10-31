@@ -4,15 +4,15 @@ LLM API 兼容性工具
 处理不同 LLM 提供商和模型版本之间的参数差异。
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, List, Sequence
 
 
 def prepare_llm_params(
     model: str,
-    messages: list,
+    messages: List[Dict[str, Any]],
     temperature: float = 0.7,
     max_tokens: int = 16384,  # 🔧 修复默认值从 2048 提升到 16384
-    **kwargs
+    **kwargs: Any
 ) -> Dict[str, Any]:
     """
     准备 LLM API 调用参数，自动处理不同模型的参数兼容性
@@ -38,7 +38,7 @@ def prepare_llm_params(
         >>> params = prepare_llm_params("gpt-4", messages, max_tokens=100)
         >>> # 返回 {"model": "gpt-4", "messages": [...], "max_tokens": 100, "temperature": 0.7}
     """
-    params = {
+    params: Dict[str, Any] = {
         "model": model,
         "messages": messages,
     }

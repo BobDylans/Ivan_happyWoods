@@ -1,0 +1,90 @@
+# Ollama Local LLM Configuration
+# 使用本地 Ollama 模型的配置示例
+
+# API Server Configuration - 与 base.yaml 相同
+api:
+  host: "127.0.0.1"
+  port: 8000
+  reload: true
+  workers: 1
+
+# LLM Configuration - Ollama 本地模型
+llm:
+  provider: "ollama"  # 标识使用 Ollama
+  api_key: "ollama"   # Ollama 不需要 API Key，但保留字段避免错误
+  base_url: "http://localhost:11434/v1"  # Ollama 默认地址
+  models:
+    default: "qwen2.5:latest"      # 通义千问 2.5
+    fast: "llama3.2:latest"        # Llama 3.2（速度快）
+    creative: "qwen2.5:latest"     # 创意模型
+  timeout: 60  # 本地模型可能需要更长时间
+  max_tokens: 4096  # Ollama 支持更大的 token
+  temperature: 0.7
+
+# Speech Configuration - 可以继续使用云端 TTS/STT
+speech:
+  tts:
+    provider: "openai"  # 或使用 Ollama 的其他方案
+    api_key: "your-api-key"
+    base_url: "https://api.openai-proxy.org"
+    voice: "alloy"
+    speed: 1.0
+    format: "mp3"
+  
+  stt:
+    provider: "openai"
+    api_key: "your-api-key"
+    base_url: "https://api.openai-proxy.org"
+    model: "whisper-1"
+    language: "zh"
+
+# Session Management - 使用数据库存储
+session:
+  timeout_minutes: 30
+  max_history: 50
+  cleanup_interval: 300
+  storage_type: "database"
+  redis_url: null
+
+# Database Configuration - PostgreSQL
+database:
+  enabled: true
+  type: "postgresql"
+  host: "localhost"
+  port: 5432
+  database: "voice_agent"
+  user: "agent_user"
+  password: "password123"
+  pool_size: 5
+  max_overflow: 10
+
+# Logging Configuration
+logging:
+  level: "DEBUG"  # 开发时使用 DEBUG 查看详细日志
+  format: "detailed"
+  file_path: "logs/voice-agent-ollama.log"
+  max_file_size: "50MB"
+  backup_count: 3
+
+# Security Configuration
+security:
+  api_keys: 
+    - "dev-test-key-123"
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://127.0.0.1:3000"
+
+# MCP Tools Configuration
+mcp:
+  enabled: true
+  tools:
+    web_search:
+      enabled: true
+      provider: "tavily"
+      api_key: "your-tavily-api-key"  # 需要设置环境变量
+    calculator:
+      enabled: true
+    datetime:
+      enabled: true
+    weather:
+      enabled: false  # 可选功能

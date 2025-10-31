@@ -1,42 +1,113 @@
-﻿# Ivan_HappyWoods Development Guidelines# Ivan_happyWoods Development Guidelines
+﻿# Ivan_HappyWoods Development Guidelines
 
+**Project**: Voice-Based AI Agent Interaction System  
+**Status**: Phase 3A Complete (PostgreSQL Integration)  
+**Last Updated**: 2025-10-31  
+**Version**: 0.3.0-beta
 
+## Active Technologies
 
-**Project**: Voice-Based AI Agent Interaction System  Auto-generated from all feature plans. Last updated: 2025-10-13
+- **Python 3.11.9** + FastAPI 0.120.2 + LangGraph + Pydantic v2
+- **Database**: PostgreSQL (SQLAlchemy async) + Alembic migrations
+- **MCP Tools**: 7 tools registered (calculator, search, time, weather, voice)
+- **Type Checking**: mypy + Pylance configured
+- **Voice Services**: iFlytek STT/TTS
+- **Storage**: PostgreSQL (persistent) + Memory Cache (hybrid)
 
-**Status**: Phase 2 Complete (80% Overall)  
+## 🎯 Quick Context for AI Assistants
 
-**Last Updated**: 2025-10-15  ## Active Technologies
-
-**Version**: 0.2.0-beta- Python 3.11+ + FastAPI, LangGraph, websockets, httpx, uvicorn, pytest (001-voice-interaction-system)
-
-- Python 3.11 + FastAPI, LangGraph, httpx (async), websockets (FastAPI WS), Pydantic v2, uvicorn, pytest, (future: MCP client, STT/TTS providers) (001-voice-interaction-system)
-
----- In-memory (LangGraph MemorySaver) for sessions in Phase 0–1; no external DB yet (001-voice-interaction-system)
-
-
-
-## 🎯 Quick Context for AI Assistants## Project Structure
-
-```
-
-**What is this project?**  src/
-
-Voice-first AI conversation system using LangGraph + FastAPI + iFlytek Voice Services.tests/
-
-```
+**What is this project?**  
+Voice-first AI conversation system using LangGraph + FastAPI + PostgreSQL + iFlytek Voice Services.
 
 **Current capabilities:**
+- ✅ Text & Voice conversation with persistent storage
+- ✅ Real-time streaming (SSE + WebSocket)
+- ✅ Session management with PostgreSQL database
+- ✅ MCP tool integration (7 tools)
+- ✅ Type checking configured (mypy + VS Code)
+- ✅ Chinese-localized codebase
 
-- ✅ Text & Voice conversation## Commands
+**For complete architecture**: Read [PROJECT.md](../PROJECT.md) ⭐
 
-- ✅ Real-time streaming (SSE + WebSocket)cd src; pytest; ruff check .
+## Recent Changes (2025-10-31)
 
-- ✅ Session management with history
+### Database Integration (Phase 3A)
+- ✅ PostgreSQL database fully integrated
+- ✅ SQLAlchemy async ORM models (User, Session, Message, ToolCall)
+- ✅ PostgreSQLCheckpointer for LangGraph state persistence
+- ✅ HybridSessionManager (memory + database)
+- ✅ Database repositories (CRUD operations)
 
-- ✅ Chinese-localized codebase## Code Style
+### Code Quality (2025-10-31)
+- ✅ Merged models.py and models_v2.py (-184 lines duplicate code)
+- ✅ Configured mypy type checking
+- ✅ VS Code Pylance configuration optimized
+- ✅ Fixed 10 basic type errors
 
-- ⏳ MCP tools (planned Phase 2E)Python 3.11+: Follow standard conventions
+### Previous Milestones
+- Phase 2F (2025-10-17): MCP Tools + Markdown rendering
+- Phase 2D (2025-10-15): Code optimization + localization
+- Phase 2A-C (2025-10-14): Voice + Streaming + API
+
+## Project Structure
+
+```
+src/
+├── agent/              # LangGraph workflow
+│   ├── graph.py       # VoiceAgent class with PostgreSQL checkpointer
+│   ├── nodes.py       # Processing nodes (~2000 lines)
+│   └── state.py       # State model
+├── api/                # FastAPI routes
+│   ├── main.py        # App entry with database integration
+│   ├── conversation_routes.py  # Dialog APIs (async)
+│   ├── voice_routes.py         # Voice APIs
+│   ├── mcp_routes.py  # MCP tool endpoints
+│   └── models.py      # Unified Pydantic models (v2)
+├── database/           # PostgreSQL integration
+│   ├── models.py      # SQLAlchemy ORM models
+│   ├── checkpointer.py # PostgreSQLCheckpointer
+│   ├── connection.py  # Async database connection
+│   └── repositories/  # CRUD operations
+├── mcp/                # MCP tool system
+│   ├── tools.py       # 4 basic tools (calculator, search, time, weather)
+│   ├── voice_tools.py # 3 voice tools (TTS, STT, analysis)
+│   ├── registry.py    # Tool registry
+│   └── base.py        # Tool base class
+├── services/           # Business logic
+│   └── voice/         # STT/TTS services
+├── utils/              # Utilities
+│   ├── llm_compat.py  # LLM compatibility layer
+│   └── hybrid_session_manager.py  # Memory + DB session management
+└── config/             # Configuration models
+
+tests/
+├── unit/               # Unit tests
+└── integration/        # Integration tests
+
+migrations/             # Alembic database migrations
+docs/                   # Documentation
+specs/                  # Feature specifications
+```
+
+## Commands
+
+```bash
+# Development
+python start_server.py              # Start server (auto-reload)
+pytest                              # Run all tests
+mypy src/                           # Type checking
+
+# Database
+alembic upgrade head                # Apply migrations
+python scripts/init_db.py           # Initialize database
+```
+
+## Code Style
+
+- **Python 3.11+**: Follow standard conventions
+- **Type Hints**: Use type hints (mypy configured)
+- **Async**: Use async/await for I/O operations
+- **Chinese**: Docstrings and user-facing messages in Chinese
 
 
 
@@ -50,16 +121,13 @@ Voice-first AI conversation system using LangGraph + FastAPI + iFlytek Voice Ser
 
 ## 📚 Essential Docs (Read First!)
 
-<!-- MANUAL ADDITIONS START -->
-
-| Document | Purpose | When to Read |<!-- MANUAL ADDITIONS END -->
-
+| Document | Purpose | When to Read |
 |----------|---------|--------------|
 | **[PROJECT.md](../PROJECT.md)** ⭐ | Full architecture & context | Starting any work |
 | **[progress.md](../specs/001-voice-interaction-system/progress.md)** | Current status & tasks | Checking progress |
-| **[DEVELOPMENT.md](../DEVELOPMENT.md)** | Developer guide | Setting up / debugging |
 | **[CHANGELOG.md](../CHANGELOG.md)** | Version history | Understanding changes |
 | **[achievements/INDEX.md](../docs/achievements/INDEX.md)** | Dev reports & fixes | Learning patterns |
+| **[QUICK_START.md](../QUICK_START.md)** | Quick start guide | First time setup |
 
 ---
 

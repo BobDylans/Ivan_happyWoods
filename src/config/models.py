@@ -62,9 +62,25 @@ class APIConfig(BaseModel):
 
 class LLMModels(BaseModel):
     """LLM model configuration for different use cases."""
-    default: str = Field(default="gpt-4", description="Default model for general use")
-    fast: str = Field(default="gpt-3.5-turbo", description="Fast model for quick responses")
-    creative: str = Field(default="gpt-4", description="Creative model for complex tasks")
+    
+    default: str = Field(default="gpt-5-mini", description="Default model for general use")
+    fast: str = Field(default="gpt-5-nano", description="Fast model for quick responses")
+    creative: str = Field(default="gpt-5-mini", description="Creative model for complex tasks")
+    
+    @validator("default", "fast", "creative")
+    def validate_model(cls, v):
+        """验证模型是否在允许列表中 - 仅限 GPT-5 系列"""
+        allowed_models = [
+            "gpt-5-mini",
+            "gpt-5-mini-2025-08-07", 
+            "gpt-5-nano"
+        ]
+        if v not in allowed_models:
+            raise ValueError(
+                f"Model '{v}' is not allowed. "
+                f"Please choose from: {', '.join(allowed_models)}"
+            )
+        return v
 
 
 class LLMConfig(BaseModel):

@@ -68,12 +68,22 @@ def get_stt_service() -> IFlytekSTTService:
     global _stt_service
     
     if _stt_service is None:
-        config = get_config()
+        import os
+        
+        # 直接从环境变量获取（临时方案，确保能读取到）
+        appid = os.getenv("IFLYTEK_APPID", "")
+        api_key = os.getenv("IFLYTEK_APIKEY", "")
+        api_secret = os.getenv("IFLYTEK_APISECRET", "")
+        
+        logger.info(f"🔍 STT配置检查: appid={'已设置' if appid else '未设置'}, api_key={'已设置' if api_key else '未设置'}, api_secret={'已设置' if api_secret else '未设置'}")
+        
+        if not appid or not api_key or not api_secret:
+            raise ValueError(f"iFlytek STT configuration missing: appid={bool(appid)}, api_key={bool(api_key)}, api_secret={bool(api_secret)}")
         
         stt_config = STTConfig(
-            appid=config.speech.stt.appid,
-            api_key=config.speech.stt.api_key,
-            api_secret=config.speech.stt.api_secret,
+            appid=appid,
+            api_key=api_key,
+            api_secret=api_secret,
             base_url="wss://iat.cn-huabei-1.xf-yun.com/v1",
             domain="slm",  # 或 "iat"
             language="mul_cn",
@@ -112,16 +122,26 @@ def get_tts_streaming_service() -> IFlytekTTSStreamingService:
     global _tts_streaming_service
     
     if _tts_streaming_service is None:
-        config = get_config()
+        import os
+        
+        # 直接从环境变量获取（临时方案）
+        appid = os.getenv("IFLYTEK_TTS_APPID", "")
+        api_key = os.getenv("IFLYTEK_TTS_APIKEY", "")
+        api_secret = os.getenv("IFLYTEK_TTS_APISECRET", "")
+        
+        logger.info(f"🔍 TTS配置检查: appid={'已设置' if appid else '未设置'}, api_key={'已设置' if api_key else '未设置'}, api_secret={'已设置' if api_secret else '未设置'}")
+        
+        if not appid or not api_key or not api_secret:
+            raise ValueError(f"iFlytek TTS configuration missing: appid={bool(appid)}, api_key={bool(api_key)}, api_secret={bool(api_secret)}")
         
         _tts_streaming_service = IFlytekTTSStreamingService(
-            appid=config.speech.tts.appid,
-            api_key=config.speech.tts.api_key,
-            api_secret=config.speech.tts.api_secret,
-            voice=config.speech.tts.voice,
-            speed=config.speech.tts.speed,
-            volume=config.speech.tts.volume,
-            pitch=config.speech.tts.pitch
+            appid=appid,
+            api_key=api_key,
+            api_secret=api_secret,
+            voice="x4_lingxiaoxuan_oral",  # 默认音色
+            speed=50,  # 默认语速
+            volume=50,  # 默认音量
+            pitch=50   # 默认音调
         )
         logger.info("流式TTS服务已初始化")
     

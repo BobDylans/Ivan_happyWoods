@@ -10,10 +10,93 @@
 ## [未发布]
 
 ### 计划中
-- MCP 工具集成 (搜索、计算器等)
-- Redis 会话存储
+- RAG 知识库集成
+- n8n 工作流集成
 - Docker 容器化
 - 监控和指标系统
+
+---
+
+## [0.3.0] - 2025-10-31
+
+### ✨ 新增
+- 💾 **PostgreSQL 数据库集成** (Phase 3A)
+  - SQLAlchemy 2.0+ 异步 ORM 模型
+  - PostgreSQLCheckpointer 实现 LangGraph 状态持久化
+  - HybridSessionManager 混合存储架构 (内存 + 数据库)
+  - 4 个数据库 Repository (Conversation, Session, Message, ToolCall)
+  - Alembic 数据库迁移支持
+  - 异步数据库连接池管理
+
+- 🔧 **MCP 工具系统** (Phase 2E/2F)
+  - 7 个 MCP 工具：calculator, time, weather, search, voice (3)
+  - ToolRegistry 工具注册表
+  - MCP API 端点 (`/api/tools/`)
+  - OpenAI Function Calling 格式支持
+  - 流式+工具调用集成
+
+- 🧠 **AI 功能增强**
+  - 上下文记忆系统 (20 条消息, 24h TTL)
+  - Markdown 渲染 + 代码语法高亮
+  - 智能提示词优化
+  - Tavily 搜索集成
+  - 完整聊天界面 Demo
+
+- 🔍 **类型检查配置**
+  - mypy 配置 (`mypy.ini`)
+  - VS Code Pylance 优化 (`.vscode/settings.json`)
+  - 修复 10 个基础类型错误
+
+### 🔧 改进
+- 合并 `models.py` 和 `models_v2.py` (-184 行重复代码, -54%)
+- API 路由异步改造 (7 处关键 await)
+- 数据库配置加载优化
+- HTTP 客户端连接池复用
+- 错误处理统一化
+
+### 🐛 修复
+- PostgreSQLCheckpointer `aget_tuple()` 未实现
+- iFlytek API 配置加载问题
+- 流式响应数据库持久化
+- 工具调用结果序列化
+- API Key 认证开发模式禁用
+
+### 📊 性能提升
+- 数据库查询异步化
+- 内存缓存 LRU 优化
+- 连接池配置优化
+
+### 🔒 安全
+- 数据库密码环境变量化
+- SQL 注入防护 (ORM 参数化查询)
+- 异步事务管理
+
+### 📝 文档
+- [phase2-database-integration-report.md](docs/phase2-database-integration-report.md) - 数据库集成报告
+- [CODE_MERGE_REPORT_2025-10-31.md](docs/CODE_MERGE_REPORT_2025-10-31.md) - 代码合并报告
+- [CODE_REVIEW_2025-10-31.md](docs/CODE_REVIEW_2025-10-31.md) - 代码审查报告
+- [VSCODE_TYPE_CHECK_CONFIG.md](docs/VSCODE_TYPE_CHECK_CONFIG.md) - 类型检查配置
+- 更新 PROJECT.md, CHANGELOG.md, progress.md
+
+### 🧪 测试
+- 数据库集成测试
+- 工具调用测试
+- 流式响应测试
+- 异步操作测试
+
+### ⚙️ 配置
+- 数据库配置 (DATABASE_URL, pool size, etc.)
+- Alembic 配置 (`alembic.ini`)
+- mypy 配置 (`mypy.ini`)
+- VS Code 配置 (`.vscode/settings.json`)
+
+### 📦 依赖更新
+- sqlalchemy>=2.0.23
+- asyncpg>=0.29.0
+- alembic>=1.13.0
+- psycopg2-binary>=2.9.9
+- mypy==1.18.2
+- types-PyYAML
 
 ---
 

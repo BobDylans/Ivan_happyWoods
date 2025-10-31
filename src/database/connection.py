@@ -98,6 +98,13 @@ async def create_tables():
     if _engine is None:
         raise RuntimeError("Database not initialized. Call init_db() first.")
     
+    # 🔧 确保 CheckpointModel 被导入，以便 Base.metadata.create_all 能创建表
+    try:
+        from .checkpointer import CheckpointModel
+        logger.debug("CheckpointModel imported for table creation")
+    except ImportError as e:
+        logger.warning(f"Could not import CheckpointModel: {e}")
+    
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     

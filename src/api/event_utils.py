@@ -85,7 +85,7 @@ def create_delta_event(
     metadata: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """Create a 'delta' event with incremental content."""
-    data = {"content": content}
+    data: Dict[str, Any] = {"content": content}
     if metadata:
         data["metadata"] = metadata
     return create_event("delta", data=data, session_id=session_id)
@@ -97,7 +97,7 @@ def create_end_event(
     metadata: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """Create an 'end' event indicating stream completion."""
-    data = {"content": content}
+    data: Dict[str, Any] = {"content": content}
     if metadata:
         data["metadata"] = metadata
     return create_event("end", data=data, session_id=session_id)
@@ -109,7 +109,7 @@ def create_error_event(
     error_code: Optional[str] = None
 ) -> Dict[str, Any]:
     """Create an 'error' event."""
-    data = {}
+    data: Dict[str, Any] = {}
     if error_code:
         data["error_code"] = error_code
     return create_event("error", data=data, session_id=session_id, error=error)

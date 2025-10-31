@@ -12,10 +12,10 @@ from sqlalchemy import (
     Column, String, DateTime, Text, Integer, ForeignKey, Index, TIMESTAMP
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.orm import declarative_base, relationship, DeclarativeBase
 from sqlalchemy.sql import func
 
-Base = declarative_base()
+Base: type[DeclarativeBase] = declarative_base()  # type: ignore[assignment]
 
 
 class User(Base):
@@ -27,7 +27,7 @@ class User(Base):
     username = Column(String(255), unique=True, nullable=False, index=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     last_active = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    metadata = Column(JSONB, default=dict, nullable=False)
+    meta_data = Column(JSONB, default=dict, nullable=False)
     
     # Relationships
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
@@ -47,7 +47,7 @@ class Session(Base):
     last_activity = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False, index=True)
     status = Column(String(20), default="ACTIVE", nullable=False)  # ACTIVE, PAUSED, TERMINATED
     context_summary = Column(Text, nullable=True)
-    metadata = Column(JSONB, default=dict, nullable=False)
+    meta_data = Column(JSONB, default=dict, nullable=False)
     
     # Relationships
     user = relationship("User", back_populates="sessions")
@@ -74,7 +74,7 @@ class Message(Base):
     timestamp = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False, index=True)
     role = Column(String(20), nullable=False)  # USER, ASSISTANT, SYSTEM, TOOL
     content = Column(Text, nullable=False)
-    metadata = Column(JSONB, default=dict, nullable=False)  # audio_format, confidence_score, etc.
+    meta_data = Column(JSONB, default=dict, nullable=False)  # audio_format, confidence_score, etc.
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     
     # Relationships
@@ -87,8 +87,12 @@ class Message(Base):
         Index('idx_message_role_timestamp', 'role', 'timestamp'),
     )
     
-    def __repr__(self):
-        content_preview = self.content[:50] + "..." if len(self.content) > 50 else self.content
+    def __repr__(self) -> str:
+        try:
+            content = str(self.content)
+            content_preview = content[:50] + "..." if len(content) > 50 else content
+        except:
+            content_preview = "[content]"
         return f"<Message(message_id={self.message_id}, role={self.role}, content={content_preview})>"
 
 

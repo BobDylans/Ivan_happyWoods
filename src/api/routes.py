@@ -18,7 +18,7 @@ from fastapi.responses import StreamingResponse
 
 from .stream_manager import get_stream_manager
 from .event_utils import create_start_event, create_end_event, create_cancelled_event, create_error_event
-from .models_v2 import (
+from .models import (
     ChatRequest, ChatResponse, SessionRequest, SessionResponse, 
     ConversationHistoryRequest, ConversationHistoryResponse,
     HealthResponse, HealthStatus, ComponentHealth, ErrorResponse,
@@ -122,9 +122,9 @@ async def chat_message(
         #判断是否需要流式返回
         effective_model_cfg = request.model_params or request.model_config_override
         if request.stream:
-            # 🔧 获取 session_manager 和历史记录
+            # 🔧 获取 session_manager 和历史记录（改为异步）
             session_manager = req.app.state.session_manager
-            external_history = session_manager.get_history(session_id)
+            external_history = await session_manager.get_history(session_id)
             
             async def event_generator():
                 try:
@@ -151,21 +151,22 @@ async def chat_message(
                         if event.get('type') == 'end':
                             break
                     
-                    # 🔧 流式完成后保存消息到历史
+                    # 🔧 流式完成后保存消息到历史（改为异步）
                     if collected:
                         full_response = "".join(collected)
                         logger.info(f"💾 [POST /chat/] 保存对话到历史 - session: {session_id}, user: {request.message[:50]}..., assistant: {len(full_response)} 字符")
-                        session_manager.add_message(session_id, "user", request.message)
-                        session_manager.add_message(session_id, "assistant", full_response)
-                        logger.info(f"✅ [POST /chat/] 历史记录已保存，当前历史长度: {len(session_manager.get_history(session_id))}")
+                        await session_manager.add_message(session_id, "user", request.message)
+                        await session_manager.add_message(session_id, "assistant", full_response)
+                        history_len = len(await session_manager.get_history(session_id))
+                        logger.info(f"✅ [POST /chat/] 历史记录已保存，当前历史长度: {history_len}")
                         
                 except Exception as e:
                     yield f"data: {json.dumps({'type':'error','error':str(e)}, ensure_ascii=False)}\n\n"
             return StreamingResponse(event_generator(), media_type="text/event-stream")
         else:
-            # 🔧 非流式模式：获取历史记录
+            # 🔧 非流式模式：获取历史记录（改为异步）
             session_manager = req.app.state.session_manager
-            external_history = session_manager.get_history(session_id)
+            external_history = await session_manager.get_history(session_id)
             
             result = await agent.process_message(
                 user_input=request.message,
@@ -175,11 +176,11 @@ async def chat_message(
                 external_history=external_history  # 🔧 传递历史记录
             )
             
-            # 🔧 保存消息到历史
+            # 🔧 保存消息到历史（改为异步）
             if result.get("success") and result.get("response"):
                 try:
-                    session_manager.add_message(session_id, "user", request.message)
-                    session_manager.add_message(session_id, "assistant", result.get("response"))
+                    await session_manager.add_message(session_id, "user", request.message)
+                    await session_manager.add_message(session_id, "assistant", result.get("response"))
                     logger.info(f"💾 [POST /chat/ 非流式] 已保存对话到历史 - session: {session_id}")
                 except Exception as e:
                     logger.warning(f"保存会话历史失败: {e}")
@@ -210,7 +211,10 @@ async def chat_message(
         raise HTTPException(status_code=500, detail="Unexpected result type")
         
     except Exception as e:
-        logger.error(f"Error processing chat message: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(f"❌ Error processing chat message: {e}")
+        logger.error(f"Full traceback:\n{error_trace}")
         processing_time = (time.time() - start_time) * 1000
         
         return ChatResponse(
@@ -236,9 +240,9 @@ async def chat_message_stream(
         raise HTTPException(status_code=503, detail="Agent not available")
     session_id = request.session_id or f"session_{uuid.uuid4().hex[:12]}"
     
-    # 🔧 获取 session_manager 和历史记录
+    # 🔧 获取 session_manager 和历史记录（改为异步）
     session_manager = req.app.state.session_manager
-    external_history = session_manager.get_history(session_id)
+    external_history = await session_manager.get_history(session_id)
     
     async def event_generator():
         accumulated_content = []  # 收集完整回复
@@ -256,13 +260,14 @@ async def chat_message_stream(
                 
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             
-            # 🔧 流式完成后保存消息到历史
+            # 🔧 流式完成后保存消息到历史（改为异步）
             if accumulated_content:
                 full_response = "".join(accumulated_content)
                 logger.info(f"💾 保存对话到历史 - session: {session_id}, user: {request.message[:50]}..., assistant: {len(full_response)} 字符")
-                session_manager.add_message(session_id, "user", request.message)
-                session_manager.add_message(session_id, "assistant", full_response)
-                logger.info(f"✅ 历史记录已保存，当前历史长度: {len(session_manager.get_history(session_id))}")
+                await session_manager.add_message(session_id, "user", request.message)
+                await session_manager.add_message(session_id, "assistant", full_response)
+                history_len = len(await session_manager.get_history(session_id))
+                logger.info(f"✅ 历史记录已保存，当前历史长度: {history_len}")
                 
         except Exception as e:
             yield f"data: {json.dumps({'type':'error','error':str(e)}, ensure_ascii=False)}\n\n"
@@ -282,9 +287,9 @@ async def chat_message_stream_get(
         raise HTTPException(status_code=503, detail="Agent not available")
     session_id = session_id or f"session_{uuid.uuid4().hex[:12]}"
     
-    # 🔧 获取历史记录
+    # 🔧 获取历史记录（改为异步）
     session_manager = req.app.state.session_manager
-    external_history = session_manager.get_history(session_id)
+    external_history = await session_manager.get_history(session_id)
     
     async def event_generator():
         accumulated_content = []
@@ -309,13 +314,14 @@ async def chat_message_stream_get(
                     accumulated_content.append(event["content"])
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             
-            # 🔧 保存消息
+            # 🔧 保存消息（改为异步）
             if accumulated_content:
                 full_response = "".join(accumulated_content)
                 logger.info(f"💾 [GET] 保存对话到历史 - session: {session_id}, message: {message[:50]}..., response: {len(full_response)} 字符")
-                session_manager.add_message(session_id, "user", message)
-                session_manager.add_message(session_id, "assistant", full_response)
-                logger.info(f"✅ [GET] 历史记录已保存，当前历史长度: {len(session_manager.get_history(session_id))}")
+                await session_manager.add_message(session_id, "user", message)
+                await session_manager.add_message(session_id, "assistant", full_response)
+                history_len = len(await session_manager.get_history(session_id))
+                logger.info(f"✅ [GET] 历史记录已保存，当前历史长度: {history_len}")
         except Exception as e:
             yield f"data: {json.dumps({'type':'error','error':str(e)}, ensure_ascii=False)}\n\n"
     
@@ -369,8 +375,8 @@ async def chat_ws(websocket: WebSocket, agent = Depends(get_voice_agent)):
             model_cfg = data.get("model_config")
             variant = data.get("model_variant")
             
-            # 🔧 获取历史记录
-            external_history = session_manager.get_history(session_id)
+            # 🔧 获取历史记录（改为异步）
+            external_history = await session_manager.get_history(session_id)
             
             if variant and model_cfg is None:
                 # Map variant -> model
@@ -401,13 +407,14 @@ async def chat_ws(websocket: WebSocket, agent = Depends(get_voice_agent)):
                         
                         await websocket.send_json(event)
                     
-                    # 🔧 保存消息到历史
+                    # 🔧 保存消息到历史（改为异步）
                     if accumulated_content:
                         full_response = "".join(accumulated_content)
                         logger.info(f"💾 [WebSocket] 保存对话到历史 - session: {session_id}, message: {message[:50] if message else 'N/A'}..., response: {len(full_response)} 字符")
-                        session_manager.add_message(session_id, "user", message)
-                        session_manager.add_message(session_id, "assistant", full_response)
-                        logger.info(f"✅ [WebSocket] 历史记录已保存，当前历史长度: {len(session_manager.get_history(session_id))}")
+                        await session_manager.add_message(session_id, "user", message)
+                        await session_manager.add_message(session_id, "assistant", full_response)
+                        history_len = len(await session_manager.get_history(session_id))
+                        logger.info(f"✅ [WebSocket] 历史记录已保存，当前历史长度: {history_len}")
                     
                     # Agent stream already sends end event, no need to duplicate
                 
@@ -524,7 +531,7 @@ async def get_conversation_history(
 
 
 @session_router.post("/", response_model=SessionResponse)
-async def create_session(request: SessionRequest = None) -> SessionResponse:
+async def create_session(request: Optional[SessionRequest] = None) -> SessionResponse:
     """
     Create a new conversation session.
     
@@ -640,6 +647,35 @@ async def delete_session(
             success=False,
             error=str(e)
         )
+
+
+# 会话管理端点
+@session_router.get("/{session_id}/history")
+async def get_session_history(session_id: str, request: Request, limit: Optional[int] = None):
+    """获取会话历史记录"""
+    session_manager = request.app.state.session_manager
+    try:
+        history = await session_manager.get_history(session_id, limit)
+        return {
+            "session_id": session_id,
+            "message_count": len(history),
+            "messages": history
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@session_router.delete("/{session_id}")
+async def clear_session(session_id: str, request: Request):
+    """清空会话历史"""
+    session_manager = request.app.state.session_manager
+    try:
+        if hasattr(session_manager, "clear_session"):
+            await session_manager.clear_session(session_id)
+        elif hasattr(session_manager, "clear_history"):
+            await session_manager.clear_history(session_id)
+        return {"message": "Session cleared", "session_id": session_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @health_router.get("/", response_model=HealthResponse)

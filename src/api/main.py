@@ -7,6 +7,7 @@ This serves as the entry point for the Voice Agent API service.
 
 import logging
 import time
+from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Dict, Any
 
@@ -20,7 +21,7 @@ from fastapi.openapi.utils import get_openapi
 from .routes import chat_router, session_router, health_router, tools_router, set_voice_agent
 from .voice_routes import voice_router
 from .conversation_routes import conversation_router
-from .models_v2 import ErrorResponse
+from .models import ErrorResponse
 from .auth import APIKeyMiddleware
 from .middleware import (
     RateLimitMiddleware, 
@@ -103,14 +104,80 @@ async def lifespan(app: FastAPI):
     except ImportError:
         logger.warning("Agent modules not available - running in mock mode")
     
-    # Initialize session history manager
+    # 🔧 方案 C: 使用硬编码数据库连接（临时方案，快速集成测试）
     try:
-        from utils.session_manager import SessionHistoryManager
-        app.state.session_manager = SessionHistoryManager(max_history=20, ttl_hours=24)
-        logger.info("Session history manager initialized successfully")
+        from utils.hybrid_session_manager import HybridSessionManager
+        from database.repositories import ConversationRepository
+        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+        import database.connection as db_conn
+        
+        logger.info("初始化 HybridSessionManager (方案 C: 直接连接)...")
+        
+        # 🔧 直接使用数据库连接字符串（使用正确的密码：changeme123）
+        DATABASE_URL = "postgresql+asyncpg://agent_user:changeme123@127.0.0.1:5432/voice_agent"
+        
+        # 创建数据库引擎并设置为全局变量（供 create_tables 使用）
+        db_engine = create_async_engine(
+            DATABASE_URL,
+            echo=False,
+            pool_size=10,
+            max_overflow=20,
+            pool_pre_ping=True,
+            pool_recycle=3600
+        )
+        
+        # 🔧 设置全局引擎变量
+        db_conn._engine = db_engine
+        
+        logger.info(f"✅ Database engine created: {DATABASE_URL.split('@')[1]}")
+        
+        # 创建所有表（包括 checkpoint 表）
+        try:
+            from database.connection import create_tables
+            await create_tables()
+            logger.info("✅ Database tables ensured")
+        except Exception as e:
+            logger.warning(f"⚠️ Table creation warning: {e}")
+        
+        # 创建 session maker
+        async_session_maker = async_sessionmaker(
+            db_engine,
+            class_=AsyncSession,
+            expire_on_commit=False
+        )
+        
+        # 创建一个长期存在的 session（在 shutdown 时清理）
+        db_session = async_session_maker()
+        conversation_repo = ConversationRepository(db_session)
+        
+        # 初始化 HybridSessionManager（启用数据库）
+        app.state.session_manager = HybridSessionManager(
+            conversation_repo=conversation_repo,
+            memory_limit=20,
+            ttl_hours=24,
+            enable_database=True
+        )
+        
+        # 保存引擎和 session 到 app.state 以便在 shutdown 时清理
+        app.state.db_engine = db_engine
+        app.state.db_session = db_session
+        
+        logger.info("✅ HybridSessionManager initialized (memory + PostgreSQL)")
+        
     except Exception as e:
-        logger.error(f"Failed to initialize session manager: {e}")
-        raise
+        import traceback
+        logger.error(f"❌ Failed to initialize hybrid session manager: {e}")
+        logger.error(f"完整错误堆栈:\n{traceback.format_exc()}")
+        logger.warning("⚠️ Falling back to memory-only session manager")
+        
+        # Fallback: 使用纯内存模式
+        try:
+            from utils.session_manager import SessionHistoryManager
+            app.state.session_manager = SessionHistoryManager(max_history=20, ttl_hours=24)
+            logger.info("✅ Session history manager initialized (memory-only fallback)")
+        except Exception as fallback_error:
+            logger.error(f"Failed to initialize fallback session manager: {fallback_error}")
+            raise
     
     logger.info("Voice Agent API service started successfully")
     
@@ -118,6 +185,22 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down Voice Agent API service...")
+    
+    # 清理数据库资源
+    try:
+        # 关闭数据库 session
+        if hasattr(app.state, 'db_session'):
+            await app.state.db_session.close()
+            logger.info("✅ Database session closed")
+        
+        # 关闭数据库引擎
+        if hasattr(app.state, 'db_engine'):
+            await app.state.db_engine.dispose()
+            logger.info("✅ Database engine disposed")
+            
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}")
+    
     logger.info("Voice Agent API service stopped")
 
 
@@ -225,7 +308,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         content=ErrorResponse(
             error=exc.detail,
             error_code=f"HTTP_{exc.status_code}",
-            timestamp=time.time(),
+            timestamp=datetime.now(),
             request_id=getattr(request.state, "request_id", None)
         ).dict()
     )
@@ -242,7 +325,7 @@ async def general_exception_handler(request: Request, exc: Exception):
             error="Internal server error",
             error_code="INTERNAL_ERROR",
             details={"exception_type": type(exc).__name__},
-            timestamp=time.time(),
+            timestamp=datetime.now(),
             request_id=getattr(request.state, "request_id", None)
         ).dict()
     )
