@@ -9,7 +9,7 @@ import logging
 import uuid
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Request
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Request, Body
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +23,14 @@ from services.conversation_service import (
 from database.connection import get_session
 from database.repositories.session_repository import SessionRepository
 from database.repositories.message_repository import MessageRepository
-from api.models import SessionListResponse, SessionListItem, SessionDetailResponse, MessageDetail
+from api.models import (
+    SessionListResponse, 
+    SessionListItem, 
+    SessionDetailResponse, 
+    MessageDetail,
+    SessionCreateRequest,
+    SessionCreateResponse
+)
 from api.auth_routes import get_current_user
 from database.models import User
 
@@ -804,6 +811,72 @@ async def send_authenticated_message(
         logger.error(f"认证对话处理失败: {e}", exc_info=True)
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"对话处理失败: {str(e)}")
+
+
+@conversation_router.post(
+    "/sessions/create",
+    response_model=SessionCreateResponse,
+    summary="创建新会话",
+    description="主动创建一个新的对话会话（可设置标题和元数据）"
+)
+async def create_new_session(
+    request: SessionCreateRequest = Body(default=SessionCreateRequest()),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    创建新会话
+    
+    **认证**: 需要 JWT Token
+    
+    **参数**:
+    - title: 会话标题（可选，默认"新对话"）
+    - metadata: 自定义元数据（可选）
+    
+    **返回**: 新会话信息（session_id, title, created_at）
+    
+    **使用场景**:
+    - 用户点击"新建会话"按钮时
+    - 希望创建空会话后再发送消息
+    - 需要预先设置会话标题或元数据
+    """
+    try:
+        user_id = current_user.user_id
+        
+        # 生成会话 ID
+        session_id = f"conv_{uuid.uuid4().hex[:12]}"
+        
+        # 准备元数据
+        title = request.title or "新对话"
+        metadata = {
+            "created_via": "manual_create",
+            "title": title,
+            **(request.metadata or {})
+        }
+        
+        # 创建会话
+        session_repo = SessionRepository(db)
+        await session_repo.create_session(
+            session_id=session_id,
+            user_id=user_id,
+            metadata=metadata
+        )
+        await db.commit()
+        
+        logger.info(f"用户 {user_id} 创建新会话: {session_id}")
+        
+        return SessionCreateResponse(
+            success=True,
+            session_id=session_id,
+            title=title,
+            created_at=datetime.now(),
+            message="会话创建成功"
+        )
+        
+    except Exception as e:
+        logger.error(f"创建会话失败: {e}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"创建会话失败: {str(e)}")
 
 
 @conversation_router.get(

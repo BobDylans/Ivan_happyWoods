@@ -201,3 +201,18 @@ class SessionDetailResponse(BaseModel):
     messages: List[MessageDetail] = Field(..., description="Session messages")
     total_messages: int = Field(..., description="Total number of messages")
     error: Optional[str] = Field(default=None, description="Error message if failed")
+
+
+class SessionCreateRequest(BaseModel):
+    """创建会话请求模型"""
+    title: Optional[str] = Field(default=None, max_length=200, description="会话标题（可选）")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="自定义元数据（可选）")
+
+
+class SessionCreateResponse(BaseModel):
+    """创建会话响应模型"""
+    success: bool = Field(default=True, description="是否成功")
+    session_id: str = Field(..., description="新会话 ID")
+    title: str = Field(..., description="会话标题")
+    created_at: datetime = Field(..., description="创建时间")
+    message: str = Field(..., description="操作消息")
