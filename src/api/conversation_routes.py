@@ -820,9 +820,9 @@ async def send_authenticated_message(
     description="主动创建一个新的对话会话（可设置标题和元数据）"
 )
 async def create_new_session(
-    request: SessionCreateRequest = Body(default=SessionCreateRequest()),
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    request: SessionCreateRequest = Body(default=None)
 ):
     """
     创建新会话
@@ -847,11 +847,11 @@ async def create_new_session(
         session_id = f"conv_{uuid.uuid4().hex[:12]}"
         
         # 准备元数据
-        title = request.title or "新对话"
+        title = (request.title if request else None) or "新对话"
         metadata = {
             "created_via": "manual_create",
             "title": title,
-            **(request.metadata or {})
+            **(request.metadata if request and request.metadata else {})
         }
         
         # 创建会话
