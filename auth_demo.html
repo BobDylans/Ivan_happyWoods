@@ -855,7 +855,7 @@
 
             try {
                 // 调用新建会话接口
-                const response = await fetch('/api/v1/conversation/sessions/create', {
+                const response = await fetch(`${getApiUrl()}/api/v1/conversation/sessions/create`, {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${accessToken}`,
