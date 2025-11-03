@@ -221,4 +221,20 @@ class MessageRepository:
             select(func.count(Message.message_id))
         )
         return result.scalar_one()
+    
+    async def count_session_messages(self, session_id: str) -> int:
+        """
+        Count messages in a specific session.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Number of messages in the session
+        """
+        result = await self.session.execute(
+            select(func.count(Message.message_id))
+            .where(Message.session_id == session_id)
+        )
+        return result.scalar_one()
 

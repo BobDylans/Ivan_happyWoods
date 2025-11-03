@@ -72,6 +72,14 @@ pytest-cov>=4.1.0,<5.0.0      # 代码覆盖率
 # types-PyYAML>=6.0.0,<7.0.0
 
 # ============================================
+# 用户认证 (User Authentication - Phase 3B)
+# ============================================
+python-jose[cryptography]>=3.3.0  # JWT Token 支持
+passlib[bcrypt]>=1.7.4            # 密码哈希
+python-multipart>=0.0.6           # OAuth2 表单数据
+email-validator>=2.0.0            # 邮箱验证 (Pydantic EmailStr)
+
+# ============================================
 # 未来扩展 (Future Extensions)
 # ============================================
 # 以下依赖在当前版本中未使用，但可能在未来版本中需要：

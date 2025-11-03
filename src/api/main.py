@@ -9,18 +9,17 @@ import logging
 import time
 from datetime import datetime
 from contextlib import asynccontextmanager
-from typing import Dict, Any
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 
 from .routes import chat_router, session_router, health_router, tools_router, set_voice_agent
 from .voice_routes import voice_router
 from .conversation_routes import conversation_router
+from .auth_routes import router as auth_router  # 🔧 添加认证路由
 from .models import ErrorResponse
 from .auth import APIKeyMiddleware
 from .middleware import (
@@ -88,7 +87,8 @@ async def lifespan(app: FastAPI):
                 stt_service = get_stt_service()
                 tts_service = get_tts_streaming_service()
                 
-                conversation_service = initialize_conversation_service(
+                # Initialize conversation service (will be used by routes)
+                _ = initialize_conversation_service(
                     agent=agent,
                     stt_service=stt_service,
                     tts_service=tts_service
@@ -131,20 +131,32 @@ async def lifespan(app: FastAPI):
         
         logger.info(f"✅ Database engine created: {DATABASE_URL.split('@')[1]}")
         
-        # 创建所有表（包括 checkpoint 表）
-        try:
-            from database.connection import create_tables
-            await create_tables()
-            logger.info("✅ Database tables ensured")
-        except Exception as e:
-            logger.warning(f"⚠️ Table creation warning: {e}")
-        
-        # 创建 session maker
+        # 🔧 创建 session maker 并设置为全局变量
         async_session_maker = async_sessionmaker(
             db_engine,
             class_=AsyncSession,
             expire_on_commit=False
         )
+        
+        # 🔧 设置全局 session factory（重要！get_session() 依赖此变量）
+        db_conn._async_session_factory = async_session_maker
+        
+        logger.info("✅ Database session factory configured")
+        
+        # 🔧 确保所有模型被导入（包括认证相关的 User 模型）
+        try:
+            from database.models import User, Session as DBSession, Message, ToolCall  # noqa: F401
+            logger.info("✅ Auth models imported (User, Session, Message, ToolCall)")
+        except ImportError as e:
+            logger.warning(f"⚠️ Could not import some models: {e}")
+        
+        # 创建所有表（包括 checkpoint 表和认证表）
+        try:
+            from database.connection import create_tables
+            await create_tables()
+            logger.info("✅ Database tables created/verified (including auth tables)")
+        except Exception as e:
+            logger.warning(f"⚠️ Table creation warning: {e}")
         
         # 创建一个长期存在的 session（在 shutdown 时清理）
         db_session = async_session_maker()
@@ -310,7 +322,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             error_code=f"HTTP_{exc.status_code}",
             timestamp=datetime.now(),
             request_id=getattr(request.state, "request_id", None)
-        ).dict()
+        ).model_dump(mode='json')  # 使用 model_dump 确保 datetime 被正确序列化
     )
 
 
@@ -327,7 +339,7 @@ async def general_exception_handler(request: Request, exc: Exception):
             details={"exception_type": type(exc).__name__},
             timestamp=datetime.now(),
             request_id=getattr(request.state, "request_id", None)
-        ).dict()
+        ).model_dump(mode='json')  # 使用 model_dump 确保 datetime 被正确序列化
     )
 
 
@@ -338,6 +350,7 @@ app.include_router(health_router, prefix="/api/v1")
 app.include_router(tools_router, prefix="/api/v1")
 app.include_router(voice_router, prefix="/api/v1")  # 语音服务路由
 app.include_router(conversation_router, prefix="/api/v1")  # 对话服务路由
+app.include_router(auth_router, prefix="/api/v1", tags=["Authentication"])  # 🔧 认证路由 (Phase 3B)
 
 
 # Root endpoint

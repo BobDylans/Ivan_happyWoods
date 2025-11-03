@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker
 )
-from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
+from sqlalchemy.pool import AsyncAdaptedQueuePool
 from sqlalchemy import text
 
 from .models import Base
@@ -100,7 +100,7 @@ async def create_tables():
     
     # 🔧 确保 CheckpointModel 被导入，以便 Base.metadata.create_all 能创建表
     try:
-        from .checkpointer import CheckpointModel
+        from .checkpointer import CheckpointModel  # noqa: F401
         logger.debug("CheckpointModel imported for table creation")
     except ImportError as e:
         logger.warning(f"Could not import CheckpointModel: {e}")
@@ -180,6 +180,30 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
         finally:
             await session.close()
 
+
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    """
+    FastAPI dependency for getting database session.
+    
+    用于 FastAPI 的依赖注入。
+    
+    Example:
+        @app.get("/users")
+        async def get_users(session: AsyncSession = Depends(get_session)):
+            result = await session.execute(select(User))
+            return result.scalars().all()
+    """
+    if _async_session_factory is None:
+        raise RuntimeError("Database not initialized. Call init_db() first.")
+    
+    async with _async_session_factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
 # 检查数据库是否健康
 async def check_db_health() -> bool:
     """
@@ -211,10 +235,10 @@ async def get_db_stats() -> dict:
     
     return {
         "status": "initialized",
-        "pool_size": pool.size(),
-        "checked_in": pool.checkedin(),
-        "checked_out": pool.checkedout(),
-        "overflow": pool.overflow(),
-        "total_connections": pool.size() + pool.overflow(),
+        "pool_size": pool.size(),  # type: ignore[attr-defined]
+        "checked_in": pool.checkedin(),  # type: ignore[attr-defined]
+        "checked_out": pool.checkedout(),  # type: ignore[attr-defined]
+        "overflow": pool.overflow(),  # type: ignore[attr-defined]
+        "total_connections": pool.size() + pool.overflow(),  # type: ignore[attr-defined]
     }
 

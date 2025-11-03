@@ -6,11 +6,13 @@ Conversation API Routes
 
 import json
 import logging
+import uuid
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from services.conversation_service import (
     get_conversation_service,
@@ -18,9 +20,25 @@ from services.conversation_service import (
     InputMode,
     OutputMode
 )
+from database.connection import get_session
+from database.repositories.session_repository import SessionRepository
+from database.repositories.message_repository import MessageRepository
+from api.models import SessionListResponse, SessionListItem, SessionDetailResponse, MessageDetail
+from api.auth_routes import get_current_user
+from database.models import User
 
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================
+# Database Dependency (使用统一的 get_session)
+# ============================================
+
+async def get_db():
+    """数据库会话依赖（兼容层）"""
+    async for session in get_session():
+        yield session
 
 
 # 自定义 JSON 编码器处理 datetime 对象
@@ -654,3 +672,282 @@ async def get_conversation_status() -> dict:
             "available": False,
             "error": str(e)
         }
+
+
+# ============================================
+# Session Management Endpoints (New)
+# ============================================
+
+
+@conversation_router.post(
+    "/send",
+    response_model=ConversationResponse,
+    summary="发送对话消息（带用户认证）",
+    description="发送消息给智能体，自动绑定用户并进行权限控制"
+)
+async def send_authenticated_message(
+    request: ConversationRequest,
+    current_user: User = Depends(get_current_user),
+    service: ConversationService = Depends(get_conv_service),
+    db: AsyncSession = Depends(get_db),
+    fastapi_request: Request = None
+) -> ConversationResponse:
+    """
+    认证用户对话接口
+    
+    **认证**: 需要 JWT Token
+    
+    **功能**:
+    - 自动绑定用户 ID
+    - 会话权限控制（只能访问自己的会话）
+    - 自动创建会话（如果不存在）
+    
+    **示例**:
+    ```bash
+    curl -X POST "http://localhost:8000/api/v1/conversation/send" \\
+         -H "Content-Type: application/json" \\
+         -H "Authorization: Bearer <your_jwt_token>" \\
+         -d '{
+           "text": "你好，请介绍一下你自己",
+           "output_mode": "text",
+           "session_id": "optional_session_id"
+         }'
+    ```
+    """
+    try:
+        # ✅ 强制使用当前登录用户的 ID
+        user_id = current_user.user_id
+        session_id = request.session_id
+        
+        session_repo = SessionRepository(db)
+        
+        # 权限检查：如果提供了 session_id，验证是否属于当前用户
+        if session_id:
+            existing_session = await session_repo.get_session(session_id)
+            
+            if existing_session:
+                # 权限检查：只能访问自己的会话
+                if existing_session.user_id and existing_session.user_id != current_user.user_id:
+                    raise HTTPException(status_code=403, detail="无权访问此会话")
+            else:
+                # 会话不存在，创建新会话并绑定用户
+                await session_repo.create_session(
+                    session_id=session_id,
+                    user_id=user_id,
+                    metadata={"created_via": "authenticated_api"}
+                )
+                await db.commit()
+        else:
+            # 🔥 没有提供 session_id，先生成一个并立即创建会话记录
+            session_id = f"conv_{uuid.uuid4().hex[:12]}"
+            await session_repo.create_session(
+                session_id=session_id,
+                user_id=user_id,
+                metadata={"created_via": "authenticated_api", "auto_generated": True}
+            )
+            await db.commit()
+            logger.info(f"✅ 自动创建会话并绑定用户: session_id={session_id}, user_id={user_id}")
+        
+        # 验证输出模式
+        try:
+            output_mode = OutputMode(request.output_mode)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的输出模式: {request.output_mode}。支持: text, audio, both"
+            )
+        
+        # 处理对话（强制使用认证用户的 ID）
+        result = await service.process_conversation(
+            text=request.text,
+            input_mode=InputMode.TEXT,
+            output_mode=output_mode,
+            voice=request.voice,
+            speed=request.speed,
+            volume=request.volume,
+            pitch=request.pitch,
+            session_id=session_id,
+            user_id=str(user_id),  # ✅ 强制使用认证用户 ID
+            session_manager=getattr(fastapi_request.app.state, 'session_manager', None)
+        )
+        
+        if not result["success"]:
+            raise HTTPException(status_code=500, detail=result.get("error", "处理失败"))
+        
+        # 保存消息到数据库
+        message_repo = MessageRepository(db)
+        session_id_result = result["session_id"]
+        
+        # 保存用户消息
+        await message_repo.save_message(
+            session_id=session_id_result,
+            role="user",
+            content=request.text,
+            metadata={"input_mode": "text"}
+        )
+        
+        # 保存助手回复
+        await message_repo.save_message(
+            session_id=session_id_result,
+            role="assistant",
+            content=result["agent_response"],
+            metadata=result.get("agent_metadata", {})
+        )
+        
+        await db.commit()
+        
+        return ConversationResponse(**result)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"认证对话处理失败: {e}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"对话处理失败: {str(e)}")
+
+
+@conversation_router.get(
+    "/sessions/",
+    response_model=SessionListResponse,
+    summary="获取用户会话列表",
+    description="获取当前登录用户的所有会话（分页）"
+)
+async def get_user_sessions(
+    page: int = 1,
+    page_size: int = 20,
+    status: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    获取当前用户的会话列表
+    
+    **认证**: 需要 JWT Token
+    
+    **参数**:
+    - page: 页码（从1开始）
+    - page_size: 每页数量（1-100）
+    - status: 会话状态过滤 (ACTIVE, PAUSED, TERMINATED)
+    
+    **返回**: 会话列表及分页信息
+    """
+    try:
+        user_id = current_user.user_id
+        
+        # 验证参数
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 100:
+            page_size = 20
+        
+        offset = (page - 1) * page_size
+        
+        # 查询会话
+        session_repo = SessionRepository(db)
+        sessions = await session_repo.get_user_sessions(
+            user_id=user_id,
+            status=status,
+            limit=page_size,
+            offset=offset
+        )
+        
+        # 统计总数
+        total = await session_repo.count_user_sessions(user_id)
+        
+        # 获取每个会话的消息数量
+        message_repo = MessageRepository(db)
+        session_items = []
+        for session in sessions:
+            message_count = await message_repo.count_session_messages(
+                str(session.session_id)
+            )
+            session_items.append(
+                SessionListItem(
+                    session_id=str(session.session_id),
+                    user_id=str(session.user_id),
+                    status=session.status,
+                    created_at=session.created_at,
+                    last_activity=session.last_activity,
+                    message_count=message_count,
+                    context_summary=session.context_summary
+                )
+            )
+        
+        return SessionListResponse(
+            success=True,
+            sessions=session_items,
+            total=total,
+            page=page,
+            page_size=page_size,
+            has_more=(offset + len(sessions)) < total
+        )
+        
+    except Exception as e:
+        logger.error(f"获取用户会话列表失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取会话列表失败: {str(e)}")
+
+
+@conversation_router.get(
+    "/sessions/{session_id}",
+    response_model=SessionDetailResponse,
+    summary="获取会话详情",
+    description="获取指定会话的详细信息（含消息历史）"
+)
+async def get_session_detail(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    获取会话详情
+    
+    **认证**: 需要 JWT Token
+    
+    **权限**: 只能查看自己的会话
+    
+    **参数**:
+    - session_id: 会话 ID
+    
+    **返回**: 会话详情及所有消息
+    """
+    try:
+        session_repo = SessionRepository(db)
+        session = await session_repo.get_session_with_messages(session_id)
+        
+        if not session:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        
+        # 权限检查：只能查看自己的会话
+        if session.user_id != current_user.user_id:
+            raise HTTPException(status_code=403, detail="无权访问此会话")
+        
+        # 构建消息列表
+        messages = [
+            MessageDetail(
+                message_id=str(msg.message_id),
+                session_id=str(msg.session_id),
+                role=msg.role,
+                content=msg.content,
+                created_at=msg.created_at,
+                metadata=msg.meta_data  # 数据库字段是 meta_data
+            )
+            for msg in session.messages
+        ]
+        
+        return SessionDetailResponse(
+            success=True,
+            session_id=str(session.session_id),
+            user_id=str(session.user_id),
+            status=session.status,
+            created_at=session.created_at,
+            last_activity=session.last_activity,
+            context_summary=session.context_summary,
+            messages=messages,
+            total_messages=len(messages)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取会话详情失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取会话详情失败: {str(e)}")

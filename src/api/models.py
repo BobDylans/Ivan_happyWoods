@@ -152,3 +152,52 @@ class WebSocketMessage(BaseModel):
     type: str = Field(..., description="Message type")
     data: Dict[str, Any] = Field(..., description="Message data")
     timestamp: datetime = Field(default_factory=datetime.now, description="Message timestamp")
+
+
+# ============================================
+# Session Management Models (New)
+# ============================================
+
+class SessionListItem(BaseModel):
+    """Session list item model for user sessions."""
+    session_id: str = Field(..., description="Session identifier")
+    user_id: str = Field(..., description="User identifier")
+    status: str = Field(..., description="Session status (ACTIVE, PAUSED, TERMINATED)")
+    created_at: datetime = Field(..., description="Session creation time")
+    last_activity: datetime = Field(..., description="Last activity timestamp")
+    message_count: int = Field(default=0, description="Total messages in session")
+    context_summary: Optional[str] = Field(default=None, description="Session context summary")
+
+
+class SessionListResponse(BaseModel):
+    """Response model for session list."""
+    success: bool = Field(default=True, description="Whether the request was successful")
+    sessions: List[SessionListItem] = Field(..., description="List of user sessions")
+    total: int = Field(..., description="Total number of sessions")
+    page: int = Field(..., description="Current page number")
+    page_size: int = Field(..., description="Number of items per page")
+    has_more: bool = Field(..., description="Whether there are more sessions available")
+
+
+class MessageDetail(BaseModel):
+    """Detailed message information."""
+    message_id: str = Field(..., description="Message identifier")
+    session_id: str = Field(..., description="Session identifier")
+    role: str = Field(..., description="Message role (user, assistant, system)")
+    content: str = Field(..., description="Message content")
+    created_at: datetime = Field(..., description="Message creation time")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Message metadata")
+
+
+class SessionDetailResponse(BaseModel):
+    """Response model for session detail."""
+    success: bool = Field(default=True, description="Whether the request was successful")
+    session_id: str = Field(..., description="Session identifier")
+    user_id: str = Field(..., description="User identifier")
+    status: str = Field(..., description="Session status")
+    created_at: datetime = Field(..., description="Session creation time")
+    last_activity: datetime = Field(..., description="Last activity timestamp")
+    context_summary: Optional[str] = Field(default=None, description="Session context summary")
+    messages: List[MessageDetail] = Field(..., description="Session messages")
+    total_messages: int = Field(..., description="Total number of messages")
+    error: Optional[str] = Field(default=None, description="Error message if failed")

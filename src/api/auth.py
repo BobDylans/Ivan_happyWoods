@@ -52,7 +52,10 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             "/redoc",
             "/favicon.ico",
             "/api/v1/health",  # Health check 不需要认证
-            "/api/v1/info"  # API 信息端点
+            "/api/v1/info",  # API 信息端点
+            "/api/v1/auth/register",  # 用户注册不需要认证
+            "/api/v1/auth/login",  # 用户登录不需要认证
+            "/api/v1/auth/refresh"  # Token 刷新不需要 API Key（需要 refresh_token）
         ]
         
         if self.enabled:

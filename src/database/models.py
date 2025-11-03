@@ -5,11 +5,9 @@ SQLAlchemy models for conversation persistence.
 """
 # 
 import uuid
-from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import (
-    Column, String, DateTime, Text, Integer, ForeignKey, Index, TIMESTAMP
+    Column, String, Text, Integer, ForeignKey, Index, TIMESTAMP
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import declarative_base, relationship, DeclarativeBase
@@ -23,8 +21,14 @@ class User(Base):
     
     __tablename__ = "users"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # 主键使用 user_id 以匹配认证系统
+    user_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(UUID(as_uuid=True), unique=True, default=uuid.uuid4, nullable=False)  # 保留旧字段以兼容
     username = Column(String(255), unique=True, nullable=False, index=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    hashed_password = Column(String(255), nullable=False)
+    full_name = Column(String(255), nullable=True)
+    is_active = Column(Integer, default=1, nullable=False)  # 1=active, 0=inactive
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     last_active = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     meta_data = Column(JSONB, default=dict, nullable=False)
@@ -33,7 +37,7 @@ class User(Base):
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
     
     def __repr__(self):
-        return f"<User(id={self.id}, username={self.username})>"
+        return f"<User(user_id={self.user_id}, username={self.username}, email={self.email})>"
 
 
 class Session(Base):
@@ -42,7 +46,7 @@ class Session(Base):
     __tablename__ = "sessions"
     
     session_id = Column(String(255), primary_key=True, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=True, index=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     last_activity = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False, index=True)
     status = Column(String(20), default="ACTIVE", nullable=False)  # ACTIVE, PAUSED, TERMINATED
@@ -91,7 +95,7 @@ class Message(Base):
         try:
             content = str(self.content)
             content_preview = content[:50] + "..." if len(content) > 50 else content
-        except:
+        except Exception:
             content_preview = "[content]"
         return f"<Message(message_id={self.message_id}, role={self.role}, content={content_preview})>"
 

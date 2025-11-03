@@ -216,7 +216,7 @@ class ConversationService:
         external_history = None
         if session_manager:
             try:
-                history = session_manager.get_history(session_id)
+                history = await session_manager.get_history(session_id)
                 if history:
                     external_history = history
                     logger.info(f"📜 已加载 {len(history)} 条历史消息")
@@ -243,9 +243,9 @@ class ConversationService:
             # 💾 保存新消息到会话历史（如果提供了 session_manager）
             if session_manager:
                 try:
-                    session_manager.add_message(session_id, "user", user_input)
-                    session_manager.add_message(session_id, "assistant", agent_response)
-                    logger.info(f"✅ 已保存对话到会话历史")
+                    await session_manager.add_message(session_id, "user", user_input)
+                    await session_manager.add_message(session_id, "assistant", agent_response)
+                    logger.info("✅ 已保存对话到会话历史")
                 except Exception as e:
                     logger.warning(f"保存会话历史失败: {e}")
             

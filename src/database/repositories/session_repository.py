@@ -10,9 +10,10 @@ from typing import List, Optional, Dict, Any
 from uuid import UUID
 
 from sqlalchemy import select, update, delete, and_, or_, func
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import Session, User
+from ..models import Session, User, Message
 
 logger = logging.getLogger(__name__)
 
@@ -268,4 +269,40 @@ class SessionRepository:
         )
         
         return result.rowcount > 0
+    
+    async def get_session_with_messages(
+        self,
+        session_id: str
+    ) -> Optional[Session]:
+        """
+        Get session with all messages (using eager loading).
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Session object with messages loaded, or None if not found
+        """
+        result = await self.session.execute(
+            select(Session)
+            .options(selectinload(Session.messages))
+            .where(Session.session_id == session_id)
+        )
+        return result.scalar_one_or_none()
+    
+    async def count_user_sessions(self, user_id: UUID) -> int:
+        """
+        Count total sessions for a user.
+        
+        Args:
+            user_id: User identifier
+            
+        Returns:
+            Number of sessions
+        """
+        result = await self.session.execute(
+            select(func.count(Session.session_id))
+            .where(Session.user_id == user_id)
+        )
+        return result.scalar_one()
 
