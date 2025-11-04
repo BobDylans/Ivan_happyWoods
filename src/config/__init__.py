@@ -2,10 +2,10 @@
 Configuration package for the voice agent system.
 
 This package provides configuration management with support for:
-- YAML configuration files
-- Environment variable overrides
+- .env file configuration
+- Environment variable parsing
 - Configuration validation
-- Hot-reloading in development
+- Simplified pure .env approach (no YAML)
 """
 
 from .models import (
@@ -21,6 +21,7 @@ from .models import (
     SessionConfig,
     LoggingConfig,
     SecurityConfig,
+    DatabaseConfig,
     LLMProvider,
     TTSProvider,
     STTProvider,
@@ -33,7 +34,7 @@ from .settings import (
     get_config,
     get_config_manager,
     load_config,
-    reload_config_if_changed,
+    reload_config,
 )
 
 __all__ = [
@@ -50,6 +51,7 @@ __all__ = [
     "SessionConfig",
     "LoggingConfig",
     "SecurityConfig",
+    "DatabaseConfig",
     
     # Enums
     "LLMProvider",
@@ -63,5 +65,5 @@ __all__ = [
     "get_config",
     "get_config_manager",
     "load_config",
-    "reload_config_if_changed",
+    "reload_config",
 ]

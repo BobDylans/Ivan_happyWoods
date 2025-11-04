@@ -17,6 +17,86 @@
 
 ---
 
+## [0.3.1] - 2025-11-04
+
+### ✨ 新增
+- 🤖 **Ollama 本地模型集成** (Phase 3A.1)
+  - 添加 `LLMProvider.OLLAMA` 枚举
+  - 支持 Ollama 模型格式 (`name:tag`，如 `qwen3:4b`)
+  - 模型名称验证放宽 (支持 qwen, llama, deepseek, mistral, phi, yi, baichuan, chatglm, gemma)
+  - API Key 验证放宽 (允许占位符 `"ollama"`)
+  - 支持本地 Ollama API (http://localhost:11434)
+
+- ⚙️ **配置系统完全重构** (Phase 3A.2)
+  - 移除 YAML 配置系统
+  - VoiceAgentConfig 继承 Pydantic BaseSettings
+  - 自动从 `.env` 加载配置
+  - 环境变量前缀: `VOICE_AGENT_`
+  - 嵌套配置分隔符: `__`
+  - 添加 `extra = "allow"` 支持额外字段
+
+- 🔧 **MCP 工具配置增强**
+  - 多源 API Key 读取 (config > TAVILY_API_KEY > VOICE_AGENT_TOOLS__SEARCH_TOOL__API_KEY)
+  - 详细配置日志输出
+  - SearchTool 调试增强
+  - 自动降级到 Mock 数据
+
+### 🔧 改进
+- 简化 `settings.py` (280行 → 130行, -54%)
+- 移除 YAML 加载逻辑
+- 移除配置热重载功能
+- 优化配置加载性能
+
+### 🐛 修复
+- 修复 `create_voice_agent()` 参数不匹配 (4个文件)
+  - `src/agent/graph.py` (2处)
+  - `src/api/main.py` (1处)
+  - `src/api/routes.py` (1处)
+  - `tests/unit/test_agent.py` (1处)
+- 修复 sqlalchemy 模块缺失 (依赖安装)
+- 修复 Pydantic 验证错误 (`extra = "allow"`)
+- 修复 tools.enabled 解析错误 (注释配置)
+
+### 🗑️ 移除
+- 删除 5 个 YAML 配置文件 (备份到 `config/backup/`)
+  - base.yaml
+  - development.yaml
+  - production.yaml
+  - testing.yaml
+  - staging.yaml
+- 移除 `_load_yaml_config()` 方法
+- 移除 `_apply_env_overrides()` 方法
+- 移除 `_merge_configs()` 方法
+- 移除 `has_config_changed()` 方法
+- 移除 `reload_if_changed()` 方法
+
+### 📝 文档
+- [OLLAMA_INTEGRATION_2025-11-04.md](docs/OLLAMA_INTEGRATION_2025-11-04.md) - 完整实施报告
+- 更新 PROJECT.md (Ollama 集成和配置迁移)
+- 更新 progress.md (Phase 3A.1 & 3A.2)
+- 更新 INDEX.md (成果索引)
+- 更新 CHANGELOG.md (本文件)
+
+### 🧪 测试
+- Ollama 模型加载测试 (qwen3:4b)
+- 对话功能完整性测试
+- MCP 工具注册测试 (7 个工具)
+- 配置加载测试
+
+### 📦 配置
+- 新增: `.env.ollama` - Ollama 专用配置模板
+- 更新: `.env.example` - 添加 Ollama 配置示例
+- 备份: `config/backup/` - YAML 配置备份
+
+### 📊 代码统计
+- **修改文件**: 9 个
+- **新增代码**: +238 行
+- **删除代码**: -315 行
+- **净减少**: -77 行 (-4%)
+- **配置简化**: settings.py -150 行 (-54%)
+
+---
+
 ## [0.3.0] - 2025-10-31
 
 ### ✨ 新增

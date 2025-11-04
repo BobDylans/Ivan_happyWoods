@@ -379,7 +379,7 @@ class TestAgentIntegration:
             mock_config.tools.enabled = ["search_tool", "calculator"]
             
             try:
-                agent = create_voice_agent(environment="testing")
+                agent = create_voice_agent()  # 移除 environment 参数，现在从 .env 自动加载
                 assert agent is not None
             except Exception as e:
                 # If we can't create the agent due to missing dependencies,

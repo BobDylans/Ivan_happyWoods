@@ -20,6 +20,7 @@ from .routes import chat_router, session_router, health_router, tools_router, se
 from .voice_routes import voice_router
 from .conversation_routes import conversation_router
 from .auth_routes import router as auth_router  # 🔧 添加认证路由
+from .session_routes import router as session_management_router  # 🔧 添加会话管理路由 (Phase 3B)
 from .models import ErrorResponse
 from .auth import APIKeyMiddleware
 from .middleware import (
@@ -75,7 +76,7 @@ async def lifespan(app: FastAPI):
         # Import with fallback handling
         try:
             from agent.graph import create_voice_agent
-            agent = create_voice_agent(environment="development")
+            agent = create_voice_agent()  # 移除 environment 参数，现在从 .env 自动加载
             set_voice_agent(agent)
             logger.info("Voice agent initialized successfully")
             
@@ -351,6 +352,7 @@ app.include_router(tools_router, prefix="/api/v1")
 app.include_router(voice_router, prefix="/api/v1")  # 语音服务路由
 app.include_router(conversation_router, prefix="/api/v1")  # 对话服务路由
 app.include_router(auth_router, prefix="/api/v1", tags=["Authentication"])  # 🔧 认证路由 (Phase 3B)
+app.include_router(session_management_router)  # 🔧 会话管理路由 (Phase 3B) - prefix 已在 router 中定义
 
 
 # Root endpoint

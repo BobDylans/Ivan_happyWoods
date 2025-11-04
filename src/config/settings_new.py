@@ -4,10 +4,12 @@ Configuration management for the voice agent system.
 This module handles loading configuration from environment variables (.env file).
 """
 
+import os
 import logging
 from pathlib import Path
 from typing import Optional
 from pydantic import ValidationError
+from dotenv import load_dotenv
 
 from .models import VoiceAgentConfig
 
@@ -54,7 +56,16 @@ class ConfigManager:
             ConfigurationError: If configuration loading or validation fails
         """
         try:
-            # Pydantic Settings automatically loads from .env
+            # Load .env file if it exists
+            if self.env_file.exists():
+                logger.info(f"Loading environment variables from: {self.env_file}")
+                load_dotenv(self.env_file, override=True)
+            else:
+                logger.warning(f".env file not found: {self.env_file}")
+                logger.info("Using system environment variables only")
+            
+            # Create configuration from environment variables
+            # Pydantic will automatically read VOICE_AGENT_* variables
             self.config = VoiceAgentConfig()
             
             logger.info("Configuration loaded successfully")
@@ -130,4 +141,3 @@ def load_config() -> VoiceAgentConfig:
 def reload_config() -> VoiceAgentConfig:
     """Force reload configuration from environment variables."""
     return get_config_manager().reload_config()
-

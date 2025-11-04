@@ -209,9 +209,11 @@ class HybridSessionManager:
         # 2. 清除数据库（如果启用）
         if self._enable_database and not self._fallback_mode and self._conversation_repo:
             try:
-                # TODO: 实现数据库会话删除方法
-                # await self._conversation_repo.delete_session(session_id)
-                logger.info(f"🗑️ 数据库会话已清除: {session_id}")
+                deleted = await self._conversation_repo.delete_session(session_id)
+                if deleted:
+                    logger.info(f"🗑️ 数据库会话已清除: {session_id}")
+                else:
+                    logger.warning(f"⚠️ 数据库中未找到会话: {session_id}")
             
             except Exception as e:
                 logger.error(f"数据库清除失败: {e}", exc_info=True)

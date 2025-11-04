@@ -8,6 +8,7 @@ providing validation, type safety, and documentation for settings.
 from enum import Enum
 from typing import Dict, List, Optional, Union
 from pydantic import BaseModel, Field, validator
+from pydantic_settings import BaseSettings
 import os
 
 
@@ -26,6 +27,7 @@ class LLMProvider(str, Enum):
     ANTHROPIC = "anthropic"
     AZURE = "azure"
     CUSTOM = "custom"
+    OLLAMA = "ollama"  # 本地 Ollama 模型
 
 
 class TTSProvider(str, Enum):
@@ -69,17 +71,32 @@ class LLMModels(BaseModel):
     
     @validator("default", "fast", "creative")
     def validate_model(cls, v):
-        """验证模型是否在允许列表中 - 仅限 GPT-5 系列"""
+        """验证模型名称 - 支持 OpenAI 和 Ollama 格式"""
+        # Ollama 模型格式: name:tag (如 qwen3:4b, llama3:8b)
+        if ":" in v:
+            # 检测是否为 Ollama 模型（包含常见模型名）
+            ollama_keywords = ["qwen", "llama", "deepseek", "mistral", "phi", "gemma", "codellama"]
+            if any(keyword in v.lower() for keyword in ollama_keywords):
+                return v  # Ollama 模型，跳过验证
+        
+        # OpenAI GPT-5 系列模型验证
         allowed_models = [
             "gpt-5-mini",
             "gpt-5-mini-2025-08-07", 
-            "gpt-5-nano"
+            "gpt-5-nano",
+            "gpt-4",
+            "gpt-4-turbo",
+            "gpt-3.5-turbo"
         ]
-        if v not in allowed_models:
-            raise ValueError(
-                f"Model '{v}' is not allowed. "
-                f"Please choose from: {', '.join(allowed_models)}"
-            )
+        if v in allowed_models:
+            return v
+            
+        # 如果既不是 Ollama 格式，也不是允许的 OpenAI 模型，则报错
+        raise ValueError(
+            f"Model '{v}' is not recognized. "
+            f"Supported formats: OpenAI models ({', '.join(allowed_models)}) "
+            f"or Ollama models (name:tag format, e.g., qwen3:4b)"
+        )
         return v
 
 
@@ -94,7 +111,14 @@ class LLMConfig(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="Response creativity")
     
     @validator("api_key")
-    def validate_api_key(cls, v):
+    def validate_api_key(cls, v, values):
+        """验证 API Key - Ollama 可以使用占位符"""
+        # Ollama 不需要真实的 API Key
+        provider = values.get("provider")
+        if provider == LLMProvider.OLLAMA:
+            return v or "ollama"  # 使用占位符
+        
+        # 其他提供商需要真实的 API Key
         if not v or len(v) < 10:
             raise ValueError("API key must be at least 10 characters long")
         return v
@@ -210,7 +234,7 @@ class SecurityConfig(BaseModel):
     rate_limit_per_minute: int = Field(default=60, ge=1, description="Rate limit per minute")
 
 
-class VoiceAgentConfig(BaseModel):
+class VoiceAgentConfig(BaseSettings):
     """Main configuration model for the voice agent system."""
     
     # Core service configurations
@@ -235,6 +259,9 @@ class VoiceAgentConfig(BaseModel):
         env_prefix = "VOICE_AGENT_"
         env_nested_delimiter = "__"
         case_sensitive = False
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        extra = "ignore"  # 忽略额外的环境变量
         
     @validator("environment")
     def validate_environment(cls, v):

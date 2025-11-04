@@ -329,7 +329,14 @@ EXAMPLE RESPONSE FORMAT:
             num_results = max(1, min(num_results, 10))
             
             # Get API key from config or environment
-            api_key = self.config.get("api_key") or os.getenv("TAVILY_API_KEY")
+            config_key = self.config.get("api_key") if self.config else None
+            env_key = os.getenv("TAVILY_API_KEY")
+            
+            # 调试日志
+            logger.info(f"🔍 [SearchTool] Config API Key: {config_key[:15] if config_key else 'None'}...")
+            logger.info(f"🔍 [SearchTool] Env API Key: {env_key[:15] if env_key else 'None'}...")
+            
+            api_key = config_key or env_key
             
             if not api_key:
                 logger.warning("Tavily API key not found, using mock results")

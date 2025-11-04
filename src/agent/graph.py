@@ -602,13 +602,12 @@ class VoiceAgent:
         }
 
 # 创建语音助手实例的工厂函数
-def create_voice_agent(config_path: Optional[str] = None, environment: str = "development") -> VoiceAgent:
+def create_voice_agent(config_path: Optional[str] = None) -> VoiceAgent:
     """
     创建语音代理实例的工厂函数。
     
     Args:
-        config_path: 配置目录的可选路径
-        environment: 要加载的环境配置
+        config_path: 配置目录的可选路径（通常为 .env 文件所在目录）
         
     Returns:
         已配置的 VoiceAgent 实例
@@ -622,11 +621,11 @@ def create_voice_agent(config_path: Optional[str] = None, environment: str = "de
             default_config_path = Path(__file__).parent.parent.parent / "config"
             config_manager = ConfigManager(default_config_path)
         
-        config = config_manager.load_config(environment)
+        config = config_manager.load_config()  # 移除 environment 参数，现在从 .env 自动加载
         
         # 创建并返回代理
         agent = VoiceAgent(config)
-        logger.info(f"语音代理使用 {environment} 配置创建成功")
+        logger.info(f"语音代理使用配置创建成功")
         return agent
         
     except Exception as e:

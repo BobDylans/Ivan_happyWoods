@@ -58,7 +58,7 @@ def get_voice_agent():
     if _voice_agent is None:
         if AGENT_AVAILABLE:
             try:
-                _voice_agent = create_voice_agent(environment="development")
+                _voice_agent = create_voice_agent()  # 移除 environment 参数，现在从 .env 自动加载
             except Exception as e:
                 logger.warning(f"Could not create voice agent: {e}")
                 _voice_agent = None

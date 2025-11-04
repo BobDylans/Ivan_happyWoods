@@ -1,23 +1,25 @@
 ﻿# Ivan_HappyWoods Development Guidelines
 
 **Project**: Voice-Based AI Agent Interaction System  
-**Status**: Phase 3A Complete (PostgreSQL Integration)  
-**Last Updated**: 2025-10-31  
-**Version**: 0.3.0-beta
+**Status**: Phase 3A.2 Complete (Ollama Integration & Config Migration)  
+**Last Updated**: 2025-11-04  
+**Version**: 0.3.1-beta
 
 ## Active Technologies
 
 - **Python 3.11.9** + FastAPI 0.120.2 + LangGraph + Pydantic v2
 - **Database**: PostgreSQL (SQLAlchemy async) + Alembic migrations
+- **LLM**: OpenAI-compatible + Ollama (本地模型支持)
 - **MCP Tools**: 7 tools registered (calculator, search, time, weather, voice)
 - **Type Checking**: mypy + Pylance configured
 - **Voice Services**: iFlytek STT/TTS
 - **Storage**: PostgreSQL (persistent) + Memory Cache (hybrid)
+- **Configuration**: 纯 .env 配置 (Pydantic Settings)
 
 ## 🎯 Quick Context for AI Assistants
 
 **What is this project?**  
-Voice-first AI conversation system using LangGraph + FastAPI + PostgreSQL + iFlytek Voice Services.
+Voice-first AI conversation system using LangGraph + FastAPI + PostgreSQL + Ollama/OpenAI + iFlytek Voice Services.
 
 **Current capabilities:**
 - ✅ Text & Voice conversation with persistent storage
@@ -26,12 +28,22 @@ Voice-first AI conversation system using LangGraph + FastAPI + PostgreSQL + iFly
 - ✅ MCP tool integration (7 tools)
 - ✅ Type checking configured (mypy + VS Code)
 - ✅ Chinese-localized codebase
+- ✅ Ollama 本地模型支持 (qwen, llama, deepseek 等)
+- ✅ 纯 .env 配置系统
 
 **For complete architecture**: Read [PROJECT.md](../PROJECT.md) ⭐
 
-## Recent Changes (2025-10-31)
+## Recent Changes (2025-11-04)
 
-### Database Integration (Phase 3A)
+### Ollama Integration & Config Migration (Phase 3A.1 & 3A.2)
+- ✅ Ollama 本地模型完全集成 (支持 name:tag 格式)
+- ✅ 配置系统迁移到纯 .env (简化 54%)
+- ✅ 修复 4 个文件的参数不匹配问题
+- ✅ MCP 工具配置增强 (多源 API Key 读取)
+- ✅ 解决 5 个关键问题 (sqlalchemy, Pydantic, tools.enabled 等)
+- ✅ 代码净减少 77 行 (-4%)
+
+### Database Integration (Phase 3A - 2025-10-31)
 - ✅ PostgreSQL database fully integrated
 - ✅ SQLAlchemy async ORM models (User, Session, Message, ToolCall)
 - ✅ PostgreSQLCheckpointer for LangGraph state persistence

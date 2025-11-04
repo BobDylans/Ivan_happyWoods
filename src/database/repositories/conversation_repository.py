@@ -51,3 +51,25 @@ class ConversationRepository:
             }
             for msg in messages
         ]
+    
+    async def delete_session(self, session_id: str) -> bool:
+        """
+        Delete a session and all related messages.
+        
+        Args:
+            session_id: Session identifier to delete
+            
+        Returns:
+            True if deleted successfully, False if session not found
+        """
+        try:
+            # Delete session (cascade will delete related messages)
+            deleted = await self.session_repo.delete_session(session_id)
+            if deleted:
+                logger.info(f"🗑️ 已删除会话及相关数据: {session_id}")
+            else:
+                logger.warning(f"⚠️ 会话不存在或已被删除: {session_id}")
+            return deleted
+        except Exception as e:
+            logger.error(f"删除会话失败 {session_id}: {e}", exc_info=True)
+            raise
