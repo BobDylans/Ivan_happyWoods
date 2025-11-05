@@ -105,89 +105,72 @@ async def lifespan(app: FastAPI):
     except ImportError:
         logger.warning("Agent modules not available - running in mock mode")
     
-    # 🔧 方案 C: 使用硬编码数据库连接（临时方案，快速集成测试）
+    # 初始化 Session Manager（支持自动降级）
     try:
-        from utils.hybrid_session_manager import HybridSessionManager
+        from utils.session_manager import HybridSessionManager
         from database.repositories import ConversationRepository
-        from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-        import database.connection as db_conn
+        from database.connection import init_db, create_tables, get_db_engine
+        from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+        from config.settings import ConfigManager
         
-        logger.info("初始化 HybridSessionManager (方案 C: 直接连接)...")
+        # 加载配置
+        config_manager = ConfigManager()
+        config = config_manager.get_config()
         
-        # 🔧 直接使用数据库连接字符串（使用正确的密码：changeme123）
-        DATABASE_URL = "postgresql+asyncpg://agent_user:changeme123@127.0.0.1:5432/voice_agent"
+        # 尝试初始化数据库
+        db_engine = None
+        if config.database.enabled:
+            logger.info("🔌 Attempting to connect to database...")
+            db_engine = await init_db(config.database)
+            
+            if db_engine:
+                # 创建表
+                try:
+                    await create_tables()
+                    logger.info("✅ Database tables created/verified")
+                except Exception as e:
+                    logger.warning(f"⚠️ Table creation warning: {e}")
         
-        # 创建数据库引擎并设置为全局变量（供 create_tables 使用）
-        db_engine = create_async_engine(
-            DATABASE_URL,
-            echo=False,
-            pool_size=10,
-            max_overflow=20,
-            pool_pre_ping=True,
-            pool_recycle=3600
-        )
-        
-        # 🔧 设置全局引擎变量
-        db_conn._engine = db_engine
-        
-        logger.info(f"✅ Database engine created: {DATABASE_URL.split('@')[1]}")
-        
-        # 🔧 创建 session maker 并设置为全局变量
-        async_session_maker = async_sessionmaker(
-            db_engine,
-            class_=AsyncSession,
-            expire_on_commit=False
-        )
-        
-        # 🔧 设置全局 session factory（重要！get_session() 依赖此变量）
-        db_conn._async_session_factory = async_session_maker
-        
-        logger.info("✅ Database session factory configured")
-        
-        # 🔧 确保所有模型被导入（包括认证相关的 User 模型）
-        try:
-            from database.models import User, Session as DBSession, Message, ToolCall  # noqa: F401
-            logger.info("✅ Auth models imported (User, Session, Message, ToolCall)")
-        except ImportError as e:
-            logger.warning(f"⚠️ Could not import some models: {e}")
-        
-        # 创建所有表（包括 checkpoint 表和认证表）
-        try:
-            from database.connection import create_tables
-            await create_tables()
-            logger.info("✅ Database tables created/verified (including auth tables)")
-        except Exception as e:
-            logger.warning(f"⚠️ Table creation warning: {e}")
-        
-        # 创建一个长期存在的 session（在 shutdown 时清理）
-        db_session = async_session_maker()
-        conversation_repo = ConversationRepository(db_session)
-        
-        # 初始化 HybridSessionManager（启用数据库）
-        app.state.session_manager = HybridSessionManager(
-            conversation_repo=conversation_repo,
-            memory_limit=20,
-            ttl_hours=24,
-            enable_database=True
-        )
-        
-        # 保存引擎和 session 到 app.state 以便在 shutdown 时清理
-        app.state.db_engine = db_engine
-        app.state.db_session = db_session
-        
-        logger.info("✅ HybridSessionManager initialized (memory + PostgreSQL)")
+        # 初始化 Session Manager
+        if db_engine:
+            # 数据库可用，使用混合模式
+            async_session_maker = async_sessionmaker(
+                db_engine,
+                class_=AsyncSession,
+                expire_on_commit=False
+            )
+            db_session = async_session_maker()
+            conversation_repo = ConversationRepository(db_session)
+            
+            app.state.session_manager = HybridSessionManager(
+                conversation_repo=conversation_repo,
+                memory_limit=20,
+                ttl_hours=24,
+                enable_database=True
+            )
+            
+            app.state.db_engine = db_engine
+            app.state.db_session = db_session
+            logger.info("✅ SessionManager initialized (memory + database)")
+        else:
+            # 数据库不可用，使用纯内存模式
+            app.state.session_manager = HybridSessionManager(
+                conversation_repo=None,
+                memory_limit=20,
+                ttl_hours=24,
+                enable_database=False
+            )
+            logger.info("✅ SessionManager initialized (memory-only mode)")
         
     except Exception as e:
-        import traceback
-        logger.error(f"❌ Failed to initialize hybrid session manager: {e}")
-        logger.error(f"完整错误堆栈:\n{traceback.format_exc()}")
-        logger.warning("⚠️ Falling back to memory-only session manager")
+        logger.error(f"❌ Failed to initialize session manager: {e}")
+        logger.warning("⚠️ Using fallback session manager")
         
-        # Fallback: 使用纯内存模式
+        # 最后的降级方案：纯内存管理器（使用别名 SessionHistoryManager）
         try:
             from utils.session_manager import SessionHistoryManager
             app.state.session_manager = SessionHistoryManager(max_history=20, ttl_hours=24)
-            logger.info("✅ Session history manager initialized (memory-only fallback)")
+            logger.info("✅ SessionManager initialized (fallback mode)")
         except Exception as fallback_error:
             logger.error(f"Failed to initialize fallback session manager: {fallback_error}")
             raise

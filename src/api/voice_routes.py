@@ -11,9 +11,8 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
-from services.voice.stt_simple import IFlytekSTTService, STTConfig, STTResult
-from services.voice.tts_simple import IFlytekTTSService
-from services.voice.tts_streaming import IFlytekTTSStreamingService
+from services.voice.stt import IFlytekSTTService, STTConfig, STTResult
+from services.voice.tts import IFlytekTTSStreamingService
 from services.voice.audio_converter import get_audio_converter, AudioConversionError
 from config.settings import get_config
 
@@ -57,9 +56,8 @@ class TTSResponse(BaseModel):
     format: Optional[str] = None
 
 
-# STT服务实例（延迟初始化）
+# 服务实例（延迟初始化）
 _stt_service: Optional[IFlytekSTTService] = None
-_tts_service: Optional[IFlytekTTSService] = None
 _tts_streaming_service: Optional[IFlytekTTSStreamingService] = None
 
 # 服务实例化
@@ -68,26 +66,22 @@ def get_stt_service() -> IFlytekSTTService:
     global _stt_service
     
     if _stt_service is None:
-        import os
+        # 使用统一配置管理器
+        config = get_config()
         
-        # 直接从环境变量获取（临时方案，确保能读取到）
-        appid = os.getenv("IFLYTEK_APPID", "")
-        api_key = os.getenv("IFLYTEK_APIKEY", "")
-        api_secret = os.getenv("IFLYTEK_APISECRET", "")
+        logger.info(f"🔍 STT配置检查: appid={'已设置' if config.speech.stt.appid else '未设置'}, api_key={'已设置' if config.speech.stt.api_key else '未设置'}, api_secret={'已设置' if config.speech.stt.api_secret else '未设置'}")
         
-        logger.info(f"🔍 STT配置检查: appid={'已设置' if appid else '未设置'}, api_key={'已设置' if api_key else '未设置'}, api_secret={'已设置' if api_secret else '未设置'}")
-        
-        if not appid or not api_key or not api_secret:
-            raise ValueError(f"iFlytek STT configuration missing: appid={bool(appid)}, api_key={bool(api_key)}, api_secret={bool(api_secret)}")
+        if not config.speech.stt.appid or not config.speech.stt.api_key or not config.speech.stt.api_secret:
+            raise ValueError(f"iFlytek STT configuration missing in config")
         
         stt_config = STTConfig(
-            appid=appid,
-            api_key=api_key,
-            api_secret=api_secret,
-            base_url="wss://iat.cn-huabei-1.xf-yun.com/v1",
-            domain="slm",  # 或 "iat"
-            language="mul_cn",
-            accent="mandarin"
+            appid=config.speech.stt.appid,
+            api_key=config.speech.stt.api_key,
+            api_secret=config.speech.stt.api_secret,
+            base_url=config.speech.stt.base_url or "wss://iat.cn-huabei-1.xf-yun.com/v1",
+            domain=config.speech.stt.domain or "slm",
+            language=config.speech.stt.language or "mul_cn",
+            accent=config.speech.stt.accent or "mandarin"
         )
         
         _stt_service = IFlytekSTTService(stt_config)
@@ -96,56 +90,35 @@ def get_stt_service() -> IFlytekSTTService:
     return _stt_service
 
 
-def get_tts_service() -> IFlytekTTSService:
-    """获取TTS服务实例（单例）"""
-    global _tts_service
-    
-    if _tts_service is None:
-        config = get_config()
-        
-        _tts_service = IFlytekTTSService(
-            appid=config.speech.tts.appid,
-            api_key=config.speech.tts.api_key,
-            api_secret=config.speech.tts.api_secret,
-            voice=config.speech.tts.voice,
-            speed=config.speech.tts.speed,
-            volume=config.speech.tts.volume,
-            pitch=config.speech.tts.pitch
-        )
-        logger.info("TTS服务已初始化")
-    
-    return _tts_service
-
-
 def get_tts_streaming_service() -> IFlytekTTSStreamingService:
     """获取流式TTS服务实例（单例）"""
     global _tts_streaming_service
     
     if _tts_streaming_service is None:
-        import os
+        # 使用统一配置管理器
+        config = get_config()
         
-        # 直接从环境变量获取（临时方案）
-        appid = os.getenv("IFLYTEK_TTS_APPID", "")
-        api_key = os.getenv("IFLYTEK_TTS_APIKEY", "")
-        api_secret = os.getenv("IFLYTEK_TTS_APISECRET", "")
+        logger.info(f"🔍 TTS配置检查: appid={'已设置' if config.speech.tts.appid else '未设置'}, api_key={'已设置' if config.speech.tts.api_key else '未设置'}, api_secret={'已设置' if config.speech.tts.api_secret else '未设置'}")
         
-        logger.info(f"🔍 TTS配置检查: appid={'已设置' if appid else '未设置'}, api_key={'已设置' if api_key else '未设置'}, api_secret={'已设置' if api_secret else '未设置'}")
-        
-        if not appid or not api_key or not api_secret:
-            raise ValueError(f"iFlytek TTS configuration missing: appid={bool(appid)}, api_key={bool(api_key)}, api_secret={bool(api_secret)}")
+        if not config.speech.tts.appid or not config.speech.tts.api_key or not config.speech.tts.api_secret:
+            raise ValueError(f"iFlytek TTS configuration missing in config")
         
         _tts_streaming_service = IFlytekTTSStreamingService(
-            appid=appid,
-            api_key=api_key,
-            api_secret=api_secret,
-            voice="x4_lingxiaoxuan_oral",  # 默认音色
-            speed=50,  # 默认语速
-            volume=50,  # 默认音量
-            pitch=50   # 默认音调
+            appid=config.speech.tts.appid,
+            api_key=config.speech.tts.api_key,
+            api_secret=config.speech.tts.api_secret,
+            voice=config.speech.tts.voice or "x4_lingxiaoxuan_oral",
+            speed=config.speech.tts.speed or 50,
+            volume=config.speech.tts.volume or 50,
+            pitch=config.speech.tts.pitch or 50
         )
-        logger.info("流式TTS服务已初始化")
+        logger.info("TTS服务已初始化")
     
     return _tts_streaming_service
+
+
+# 向后兼容别名
+get_tts_service = get_tts_streaming_service
 
 # 声明请求路径
 @voice_router.post(
@@ -393,7 +366,7 @@ async def synthesize_speech(request: TTSRequest):
         logger.info(f"收到TTS合成请求: 文本长度={len(request.text)}, 发音人={request.voice}")
         
         # 2. 获取TTS服务
-        tts_service = get_tts_service()
+        tts_service = get_tts_streaming_service()
         
         # 3. 执行合成
         try:
@@ -672,7 +645,7 @@ async def get_voice_status() -> dict:
         tts_voice = None
         
         try:
-            tts_service = get_tts_service()
+            tts_service = get_tts_streaming_service()
             tts_available = await tts_service.is_available()
             tts_voice = tts_service.voice
         except Exception as e:

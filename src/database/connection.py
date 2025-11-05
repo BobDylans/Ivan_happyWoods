@@ -42,49 +42,62 @@ def get_database_url(config) -> str:
     )
 
 # 初始化数据库连接池
-async def init_db(config, echo: bool = False) -> AsyncEngine:
+async def init_db(config, echo: bool = False) -> Optional[AsyncEngine]:
     """
-    Initialize database connection pool.
+    Initialize database connection pool with auto-fallback support.
     
     Args:
         config: DatabaseConfig object
         echo: Whether to echo SQL statements
         
     Returns:
-        AsyncEngine instance
+        AsyncEngine instance if successful, None if connection failed
     """
     global _engine, _async_session_factory
     # 如果数据库引擎已经存在，则不用再创建
     if _engine is not None:
         logger.warning("Database already initialized, returning existing engine")
         return _engine
-    # 调用方法获取到url
-    database_url = get_database_url(config)
     
-    # Create async engine
-    _engine = create_async_engine(
-        # 将相关参数带入，创建数据库引擎
-        database_url,
-        echo=echo,
-        poolclass=AsyncAdaptedQueuePool,
-        pool_size=config.pool_size,
-        max_overflow=config.max_overflow,
-        pool_pre_ping=True,  # Enable connection health checks
-        pool_recycle=3600,   # Recycle connections after 1 hour
-    )
-    
-    # Create session factory
-    _async_session_factory = async_sessionmaker(
-        _engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autocommit=False,
-        autoflush=False,
-    )
-    
-    logger.info(f"Database connection pool initialized: {config.host}:{config.port}/{config.database}")
-    
-    return _engine
+    try:
+        # 调用方法获取到url
+        database_url = get_database_url(config)
+        
+        # Create async engine
+        _engine = create_async_engine(
+            # 将相关参数带入，创建数据库引擎
+            database_url,
+            echo=echo,
+            poolclass=AsyncAdaptedQueuePool,
+            pool_size=config.pool_size,
+            max_overflow=config.max_overflow,
+            pool_pre_ping=True,  # Enable connection health checks
+            pool_recycle=3600,   # Recycle connections after 1 hour
+            connect_args={"timeout": 5}  # 5秒连接超时
+        )
+        
+        # 测试连接
+        async with _engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        
+        # Create session factory
+        _async_session_factory = async_sessionmaker(
+            _engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autocommit=False,
+            autoflush=False,
+        )
+        
+        logger.info(f"✅ Database connection pool initialized: {config.host}:{config.port}/{config.database}")
+        return _engine
+        
+    except Exception as e:
+        logger.warning(f"⚠️ Database connection failed: {e}")
+        logger.info("📝 System will fallback to memory-only mode")
+        _engine = None
+        _async_session_factory = None
+        return None
 
 # 根据项目中的类来创建对应的数据库表
 async def create_tables():

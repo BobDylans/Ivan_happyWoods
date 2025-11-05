@@ -476,6 +476,56 @@ class IFlyTekSTTService:
             logger.error(f"Error sending audio stream: {e}")
             raise
     
+    async def recognize(self, audio_data: bytes) -> STTResult:
+        """
+        简化的非流式识别（一次性上传完整音频）
+        
+        这是对 recognize_stream 的简单封装，适用于短音频的一次性识别。
+        
+        Args:
+            audio_data: PCM 音频数据 (16kHz, 16-bit, mono)
+        
+        Returns:
+            STTResult: 包含识别文本和状态的结果对象
+        
+        Example:
+            >>> audio_bytes = load_pcm_audio("test.pcm")
+            >>> result = await stt.recognize(audio_bytes)
+            >>> if result.is_final:
+            ...     print(f"Result: {result.text}")
+        """
+        try:
+            # 创建简单的音频迭代器（一次性发送）
+            async def audio_iterator():
+                # 分块发送（每帧 1280 字节，约 40ms @ 16kHz）
+                frame_size = 1280
+                offset = 0
+                while offset < len(audio_data):
+                    chunk = audio_data[offset:offset + frame_size]
+                    offset += frame_size
+                    yield chunk
+            
+            # 使用流式识别获取结果
+            result_text = ""
+            async for result in self.recognize_stream(audio_iterator()):
+                if result.is_final:
+                    result_text = result.text
+                    break
+            
+            return STTResult(
+                text=result_text,
+                is_final=True,
+                confidence=0.0
+            )
+        
+        except Exception as e:
+            logger.error(f"Recognition failed: {e}")
+            return STTResult(
+                text="",
+                is_final=False,
+                confidence=0.0
+            )
+    
     async def recognize_file(self, audio_file_path: str) -> str:
         """
         Recognize speech from audio file.

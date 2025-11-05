@@ -71,13 +71,17 @@ class LLMModels(BaseModel):
     
     @validator("default", "fast", "creative")
     def validate_model(cls, v):
-        """验证模型名称 - 支持 OpenAI 和 Ollama 格式"""
+        """验证模型名称 - 支持 OpenAI、Claude、Ollama 格式"""
         # Ollama 模型格式: name:tag (如 qwen3:4b, llama3:8b)
         if ":" in v:
             # 检测是否为 Ollama 模型（包含常见模型名）
             ollama_keywords = ["qwen", "llama", "deepseek", "mistral", "phi", "gemma", "codellama"]
             if any(keyword in v.lower() for keyword in ollama_keywords):
                 return v  # Ollama 模型，跳过验证
+        
+        # Claude 模型验证 (支持所有 Claude 模型)
+        if v.startswith("claude-"):
+            return v  # Claude 模型，允许通过
         
         # OpenAI GPT-5 系列模型验证
         allowed_models = [
@@ -90,11 +94,17 @@ class LLMModels(BaseModel):
         ]
         if v in allowed_models:
             return v
+        
+        # 其他通用模型名称（放宽验证）
+        # 如果模型名包含常见前缀，也允许通过
+        common_prefixes = ["gpt-", "text-", "davinci", "curie", "babbage", "ada"]
+        if any(v.startswith(prefix) for prefix in common_prefixes):
+            return v
             
-        # 如果既不是 Ollama 格式，也不是允许的 OpenAI 模型，则报错
+        # 如果都不匹配，报错
         raise ValueError(
             f"Model '{v}' is not recognized. "
-            f"Supported formats: OpenAI models ({', '.join(allowed_models)}) "
+            f"Supported formats: OpenAI models (gpt-*), Claude models (claude-*), "
             f"or Ollama models (name:tag format, e.g., qwen3:4b)"
         )
         return v

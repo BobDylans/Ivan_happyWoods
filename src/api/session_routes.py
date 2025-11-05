@@ -24,7 +24,7 @@ from database.repositories.session_repository import SessionRepository
 from database.repositories.message_repository import MessageRepository
 from database.repositories.conversation_repository import ConversationRepository
 from database.models import User
-from utils.hybrid_session_manager import get_session_manager
+from utils.session_manager import get_session_manager
 
 logger = logging.getLogger(__name__)
 
