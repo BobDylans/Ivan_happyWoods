@@ -42,10 +42,32 @@ class ChatResponse(BaseModel):
     confidence: Optional[float] = Field(default=None, description="Intent confidence score")
     tool_calls: int = Field(default=0, description="Number of tool calls made")
     processing_time_ms: Optional[float] = Field(default=None, description="Processing time in milliseconds")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Additional agent metadata")
+    rag_snippets: Optional[List[Dict[str, Any]]] = Field(default=None, description="Knowledge snippets retrieved via RAG")
     
     # Error information
     error: Optional[str] = Field(default=None, description="Error message if failed")
     error_code: Optional[str] = Field(default=None, description="Error code if failed")
+
+
+class RAGUploadFileStatus(str, Enum):
+    ACCEPTED = "accepted"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
+class RAGUploadFileResult(BaseModel):
+    filename: str = Field(..., description="Original filename of the uploaded document")
+    status: RAGUploadFileStatus = Field(..., description="Processing status for this document")
+    detail: Optional[str] = Field(default=None, description="Additional information about the status")
+
+
+class RAGUploadResponse(BaseModel):
+    success: bool = Field(..., description="Whether any document chunks were stored")
+    processed_files: int = Field(..., description="Number of files processed for ingestion")
+    stored_chunks: int = Field(..., description="Total chunks stored in Qdrant")
+    results: List[RAGUploadFileResult] = Field(..., description="Per-file processing results")
+    message: str = Field(..., description="Human-readable summary of the ingestion outcome")
 
 
 class SessionInfo(BaseModel):

@@ -10,19 +10,31 @@ import logging
 import json
 import asyncio
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Depends,
+    BackgroundTasks,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    UploadFile,
+    File,
+)
 from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
 
 from .stream_manager import get_stream_manager
 from .event_utils import create_start_event, create_end_event, create_cancelled_event, create_error_event
 from .models import (
-    ChatRequest, ChatResponse, SessionRequest, SessionResponse, 
+    ChatRequest, ChatResponse, SessionRequest, SessionResponse,
     ConversationHistoryRequest, ConversationHistoryResponse,
     HealthResponse, HealthStatus, ComponentHealth, ErrorResponse,
-    ModelConfigRequest, SessionInfo, ChatMessage, MessageRole
+    ModelConfigRequest, SessionInfo, ChatMessage, MessageRole,
+    RAGUploadResponse, RAGUploadFileResult, RAGUploadFileStatus,
 )
 
 # Import agent functionality with fallback
@@ -36,11 +48,14 @@ except ImportError:
     AgentMessageRole = None
 
 try:
-    from config.settings import ConfigManager
+    from config.settings import ConfigManager, get_config
     CONFIG_AVAILABLE = True
 except ImportError:
     CONFIG_AVAILABLE = False
     ConfigManager = None
+    get_config = None  # type: ignore
+
+from rag.ingestion import SUPPORTED_SUFFIXES, configure_proxy_bypass, ingest_files
 
 
 logger = logging.getLogger(__name__)
@@ -83,6 +98,7 @@ chat_router = APIRouter(prefix="/chat", tags=["Chat"])
 session_router = APIRouter(prefix="/session", tags=["Session"])
 health_router = APIRouter(prefix="/health", tags=["Health"])
 tools_router = APIRouter(prefix="/tools", tags=["Tools"])
+rag_router = APIRouter(prefix="/rag", tags=["RAG"])
 
 
 @chat_router.post("/", response_model=ChatResponse)
@@ -197,15 +213,19 @@ async def chat_message(
         }
         
         if isinstance(result, dict):
+            result_metadata = result.get("metadata") or {}
+            rag_snippets = result.get("rag_snippets") or result_metadata.get("rag_snippets")
             return ChatResponse(
                 success=result.get("success", True),
                 response=result.get("response", ""),
                 session_id=session_id,
                 message_id=message_id,
                 timestamp=datetime.now(),
-                intent=result.get("metadata", {}).get("intent"),
-                tool_calls=result.get("metadata", {}).get("tool_calls", 0),
+                intent=result_metadata.get("intent"),
+                tool_calls=result_metadata.get("tool_calls", 0),
                 processing_time_ms=processing_time,
+                metadata=result_metadata or None,
+                rag_snippets=rag_snippets or None,
                 error=result.get("error") if not result.get("success", True) else None
             )
         raise HTTPException(status_code=500, detail="Unexpected result type")
@@ -707,6 +727,12 @@ async def health_check() -> HealthResponse:
         # Check session store
         session_health = _check_session_health()
         components.append(session_health)
+
+        # Check RAG / Qdrant connectivity
+        rag_health = await _check_rag_health()
+        components.append(rag_health)
+        if rag_health.status == HealthStatus.UNHEALTHY and overall_status == HealthStatus.HEALTHY:
+            overall_status = HealthStatus.DEGRADED
         
         # Calculate metrics
         metrics = {
@@ -827,6 +853,65 @@ def _check_session_health() -> ComponentHealth:
         )
 
 
+async def _check_rag_health() -> ComponentHealth:
+    """Check Qdrant RAG subsystem."""
+
+    start_time = time.time()
+    try:
+        if not CONFIG_AVAILABLE or get_config is None:
+            return ComponentHealth(
+                name="rag",
+                status=HealthStatus.DEGRADED,
+                message="Configuration module unavailable",
+                response_time_ms=(time.time() - start_time) * 1000,
+                last_check=datetime.now(),
+            )
+
+        config = get_config()
+        if not config.rag.enabled:
+            return ComponentHealth(
+                name="rag",
+                status=HealthStatus.HEALTHY,
+                message="RAG disabled in configuration",
+                response_time_ms=(time.time() - start_time) * 1000,
+                last_check=datetime.now(),
+            )
+
+        try:
+            from rag.qdrant_store import QdrantVectorStore
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            return ComponentHealth(
+                name="rag",
+                status=HealthStatus.DEGRADED,
+                message=f"Qdrant client not available: {exc}",
+                response_time_ms=(time.time() - start_time) * 1000,
+                last_check=datetime.now(),
+            )
+
+        store = QdrantVectorStore(config.rag)
+        try:
+            await store.ensure_collection(config.rag.embed_dim, recreate=False)
+        finally:
+            await store.close()
+
+        return ComponentHealth(
+            name="rag",
+            status=HealthStatus.HEALTHY,
+            message="Qdrant reachable",
+            response_time_ms=(time.time() - start_time) * 1000,
+            last_check=datetime.now(),
+        )
+
+    except Exception as e:
+        return ComponentHealth(
+            name="rag",
+            status=HealthStatus.UNHEALTHY,
+            message=f"RAG error: {str(e)}",
+            response_time_ms=(time.time() - start_time) * 1000,
+            last_check=datetime.now(),
+        )
+
+
 # ===========================
 # Tools Endpoints
 # ===========================
@@ -924,7 +1009,6 @@ async def execute_tool(tool_name: str, parameters: Dict[str, Any]):
             "tool": tool_name,
             "result": result
         }
-    
     except Exception as e:
         logger.error(f"Error executing tool {tool_name}: {e}")
         return {
@@ -932,3 +1016,148 @@ async def execute_tool(tool_name: str, parameters: Dict[str, Any]):
             "tool": tool_name,
             "error": str(e)
         }
+
+
+@rag_router.post("/upload", response_model=RAGUploadResponse)
+async def upload_documents(files: List[UploadFile] = File(...)) -> RAGUploadResponse:
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    if not CONFIG_AVAILABLE or get_config is None:
+        raise HTTPException(status_code=503, detail="Configuration system unavailable")
+
+    config = get_config()
+    rag_cfg = config.rag
+
+    if not rag_cfg.enabled:
+        raise HTTPException(status_code=503, detail="RAG is disabled in configuration")
+
+    temp_dir = Path(rag_cfg.upload_temp_dir).expanduser().resolve()
+    try:
+        temp_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:  # pragma: no cover - unlikely permission issue
+        logger.error("Failed to create upload directory %s: %s", temp_dir, exc)
+        raise HTTPException(status_code=500, detail="Unable to create upload directory")
+
+    max_bytes = rag_cfg.max_upload_size_mb * 1024 * 1024
+    pre_results: List[RAGUploadFileResult] = []
+    saved_files: Dict[Path, str] = {}
+
+    for upload in files:
+        original_name = upload.filename or "untitled"
+        suffix = Path(original_name).suffix.lower()
+
+        if suffix not in SUPPORTED_SUFFIXES:
+            pre_results.append(
+                RAGUploadFileResult(
+                    filename=original_name,
+                    status=RAGUploadFileStatus.SKIPPED,
+                    detail="Unsupported file type",
+                )
+            )
+            await upload.close()
+            continue
+
+        data = await upload.read()
+        await upload.close()
+
+        if not data:
+            pre_results.append(
+                RAGUploadFileResult(
+                    filename=original_name,
+                    status=RAGUploadFileStatus.SKIPPED,
+                    detail="File is empty",
+                )
+            )
+            continue
+
+        if len(data) > max_bytes:
+            pre_results.append(
+                RAGUploadFileResult(
+                    filename=original_name,
+                    status=RAGUploadFileStatus.SKIPPED,
+                    detail=f"File exceeds {rag_cfg.max_upload_size_mb} MB limit",
+                )
+            )
+            continue
+
+        dest_path = temp_dir / f"{uuid.uuid4().hex}{suffix}"
+        dest_path.write_bytes(data)
+        saved_files[dest_path] = original_name
+
+    if not saved_files:
+        message = "No documents accepted for ingestion."
+        return RAGUploadResponse(
+            success=False,
+            processed_files=0,
+            stored_chunks=0,
+            results=pre_results,
+            message=message,
+        )
+
+    ingestion_result = None
+    file_paths = list(saved_files.keys())
+
+    try:
+        configure_proxy_bypass(rag_cfg.qdrant_url)
+        ingestion_result = await ingest_files(
+            config,
+            file_paths,
+            recreate=False,
+            batch_size=rag_cfg.ingest_batch_size,
+        )
+    except Exception as exc:
+        logger.error("RAG ingestion failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}")
+    finally:
+        for path in file_paths:
+            try:
+                path.unlink(missing_ok=True)
+            except Exception as cleanup_exc:  # pragma: no cover - best effort cleanup
+                logger.warning("Failed to delete temporary upload %s: %s", path, cleanup_exc)
+
+    results: List[RAGUploadFileResult] = list(pre_results)
+    failed_map = {path: error for path, error in ingestion_result.failed_files}
+    skipped_set = set(ingestion_result.skipped_files)
+
+    for path in file_paths:
+        path_str = str(path)
+        original_name = saved_files[path]
+
+        if path_str in failed_map:
+            results.append(
+                RAGUploadFileResult(
+                    filename=original_name,
+                    status=RAGUploadFileStatus.FAILED,
+                    detail=failed_map[path_str],
+                )
+            )
+        elif path_str in skipped_set:
+            results.append(
+                RAGUploadFileResult(
+                    filename=original_name,
+                    status=RAGUploadFileStatus.SKIPPED,
+                    detail="No ingestible content found",
+                )
+            )
+        else:
+            results.append(
+                RAGUploadFileResult(
+                    filename=original_name,
+                    status=RAGUploadFileStatus.ACCEPTED,
+                    detail=None,
+                )
+            )
+
+    message = (
+        f"Processed {ingestion_result.processed_files} file(s); "
+        f"stored {ingestion_result.stored_chunks} chunk(s)."
+    )
+
+    return RAGUploadResponse(
+        success=ingestion_result.stored_chunks > 0,
+        processed_files=ingestion_result.processed_files,
+        stored_chunks=ingestion_result.stored_chunks,
+        results=results,
+        message=message,
+    )

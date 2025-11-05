@@ -9,6 +9,22 @@
 
 ## [未发布]
 
+### ✨ 新增
+- 📚 **RAG/Qdrant 集成框架**
+  - 新增 RAG 配置模型与环境变量映射
+  - `scripts/rag_ingest.py` 支持批量导入 `docs/` 文档
+  - `RAGService` 自动将检索结果注入 LLM 提示
+- 🌐 **RAG 文档上传接口**
+  - 新增 `POST /api/v1/rag/upload`，支持上传 Markdown/PDF/DOCX 并自动入库
+  - `rag.ingestion` 模块抽离导入逻辑，统一脚本与 API 行为并自动清理临时文件
+- 🔍 **健康检查扩展**: `/api/v1/health` 增加 `rag` 组件状态
+
+### 🧪 测试
+- 新增单元测试 `tests/unit/test_rag_service.py`
+
+### 📝 文档
+- 新增指南 [docs/RAG_SETUP.md](docs/RAG_SETUP.md)
+
 ### 计划中
 - RAG 知识库集成
 - n8n 工作流集成

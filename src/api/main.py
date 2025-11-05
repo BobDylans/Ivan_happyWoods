@@ -16,7 +16,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.openapi.utils import get_openapi
 
-from .routes import chat_router, session_router, health_router, tools_router, set_voice_agent
+from .routes import chat_router, session_router, health_router, tools_router, rag_router, set_voice_agent
 from .voice_routes import voice_router
 from .conversation_routes import conversation_router
 from .auth_routes import router as auth_router  # 🔧 添加认证路由
@@ -334,6 +334,7 @@ app.include_router(health_router, prefix="/api/v1")
 app.include_router(tools_router, prefix="/api/v1")
 app.include_router(voice_router, prefix="/api/v1")  # 语音服务路由
 app.include_router(conversation_router, prefix="/api/v1")  # 对话服务路由
+app.include_router(rag_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1", tags=["Authentication"])  # 🔧 认证路由 (Phase 3B)
 app.include_router(session_management_router)  # 🔧 会话管理路由 (Phase 3B) - prefix 已在 router 中定义
 

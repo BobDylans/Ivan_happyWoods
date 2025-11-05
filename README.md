@@ -24,6 +24,7 @@ cp .env.example .env
 # 编辑 .env 文件，填写必需的 API Keys:
 # - VOICE_AGENT_LLM__API_KEY (OpenAI 或兼容 API)
 # - IFLYTEK_APPID, IFLYTEK_APIKEY, IFLYTEK_APISECRET (科大讯飞)
+# 如需启用 RAG，请追加 VOICE_AGENT_RAG__* 相关配置（参阅 docs/RAG_SETUP.md）
 
 # 4. 启动服务
 python start_server.py
@@ -40,8 +41,10 @@ python start_server.py
 - 🎤 **语音对话**: 科大讯飞 STT/TTS，支持流式响应
 - 🤖 **智能代理**: LangGraph 工作流，多步骤推理
 - 🔧 **工具调用**: MCP 协议，7+ 内置工具（搜索、计算器、时间等）
-- � **对话管理**: 会话历史、上下文记忆（最多20条消息）
-- � **流式传输**: SSE + WebSocket 双模式
+- 📚 **知识检索**: Qdrant + 外部 Embedding 支持的 RAG 能力
+- 📤 **文档上传**: 支持 Markdown / PDF / DOCX 热插入，自动入库并清理临时文件
+- 🧠 **对话管理**: 会话历史、上下文记忆（最多20条消息）
+- ⚡ **流式传输**: SSE + WebSocket 双模式
 - 🎨 **Markdown 渲染**: 格式化输出，代码高亮
 
 ---
@@ -51,6 +54,7 @@ python start_server.py
 - **[PROJECT.md](PROJECT.md)** - 完整项目架构和技术栈 ⭐
 - **[CHANGELOG.md](CHANGELOG.md)** - 版本变更历史
 - **[docs/](docs/)** - 详细技术文档和指南
+- **[docs/RAG_SETUP.md](docs/RAG_SETUP.md)** - Qdrant RAG 部署与导入指南
 
 ---
 

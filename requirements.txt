@@ -84,6 +84,7 @@ email-validator>=2.0.0            # 邮箱验证 (Pydantic EmailStr)
 # ============================================
 qdrant-client==1.9.2          # Qdrant 向量数据库客户端
 pypdf==5.1.0                  # PDF 文本解析 (RAG 文档导入)
+python-docx==1.1.2            # Word 文档解析 (RAG 文档导入)
 # tiktoken==0.7.0             # 可选: Token 分块 (后续需要再开启)
 
 # ============================================
