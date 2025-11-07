@@ -7,14 +7,16 @@ FastAPI endpoints for voice services (STT/TTS).
 import logging
 from typing import Optional
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from services.voice.stt import IFlyTekSTTService, STTConfig, STTResult
 from services.voice.tts import IFlytekTTSStreamingService
 from services.voice.audio_converter import get_audio_converter, AudioConversionError
-from config.settings import get_config
+
+# 使用新的依赖注入系统
+from core.dependencies import get_stt_service, get_tts_service
 
 
 logger = logging.getLogger(__name__)
@@ -56,70 +58,6 @@ class TTSResponse(BaseModel):
     format: Optional[str] = None
 
 
-# 服务实例（延迟初始化）
-_stt_service: Optional[IFlyTekSTTService] = None
-_tts_streaming_service: Optional[IFlytekTTSStreamingService] = None
-
-# 服务实例化
-def get_stt_service() -> IFlyTekSTTService:
-    """获取STT服务实例（单例）"""
-    global _stt_service
-    
-    if _stt_service is None:
-        # 使用统一配置管理器
-        config = get_config()
-        
-        logger.info(f"🔍 STT配置检查: appid={'已设置' if config.speech.stt.appid else '未设置'}, api_key={'已设置' if config.speech.stt.api_key else '未设置'}, api_secret={'已设置' if config.speech.stt.api_secret else '未设置'}")
-        
-        if not config.speech.stt.appid or not config.speech.stt.api_key or not config.speech.stt.api_secret:
-            raise ValueError(f"iFlytek STT configuration missing in config")
-        
-        stt_config = STTConfig(
-            appid=config.speech.stt.appid,
-            api_key=config.speech.stt.api_key,
-            api_secret=config.speech.stt.api_secret,
-            base_url=config.speech.stt.base_url or "wss://iat.cn-huabei-1.xf-yun.com/v1",
-            domain=config.speech.stt.domain or "slm",
-            language=config.speech.stt.language or "mul_cn",
-            accent=config.speech.stt.accent or "mandarin"
-        )
-        
-        _stt_service = IFlyTekSTTService(stt_config)
-        logger.info("STT服务已初始化")
-    
-    return _stt_service
-
-
-def get_tts_streaming_service() -> IFlytekTTSStreamingService:
-    """获取流式TTS服务实例（单例）"""
-    global _tts_streaming_service
-    
-    if _tts_streaming_service is None:
-        # 使用统一配置管理器
-        config = get_config()
-        
-        logger.info(f"🔍 TTS配置检查: appid={'已设置' if config.speech.tts.appid else '未设置'}, api_key={'已设置' if config.speech.tts.api_key else '未设置'}, api_secret={'已设置' if config.speech.tts.api_secret else '未设置'}")
-        
-        if not config.speech.tts.appid or not config.speech.tts.api_key or not config.speech.tts.api_secret:
-            raise ValueError(f"iFlytek TTS configuration missing in config")
-        
-        _tts_streaming_service = IFlytekTTSStreamingService(
-            appid=config.speech.tts.appid,
-            api_key=config.speech.tts.api_key,
-            api_secret=config.speech.tts.api_secret,
-            voice=config.speech.tts.voice or "x4_lingxiaoxuan_oral",
-            speed=config.speech.tts.speed or 50,
-            volume=config.speech.tts.volume or 50,
-            pitch=config.speech.tts.pitch or 50
-        )
-        logger.info("TTS服务已初始化")
-    
-    return _tts_streaming_service
-
-
-# 向后兼容别名
-get_tts_service = get_tts_streaming_service
-
 # 声明请求路径
 @voice_router.post(
     "/stt/recognize",
@@ -128,7 +66,8 @@ get_tts_service = get_tts_streaming_service
     description="上传音频文件进行语音识别，返回文本结果。支持多种音频格式自动转换。"
 )
 async def recognize_speech(
-    audio: UploadFile = File(..., description="音频文件（支持 MP3, WAV, M4A, AAC, OGG, FLAC 等格式）")
+    audio: UploadFile = File(..., description="音频文件（支持 MP3, WAV, M4A, AAC, OGG, FLAC 等格式）"),
+    stt_service: IFlyTekSTTService = Depends(get_stt_service)
 ) -> STTResponse:
     """
     语音转文字接口
@@ -226,11 +165,8 @@ async def recognize_speech(
         is_valid, validation_msg = converter.validate_audio(pcm_data)
         if not is_valid:
             raise HTTPException(status_code=400, detail=f"音频验证失败: {validation_msg}")
-        
-        # 5. 获取STT服务
-        stt_service = get_stt_service()
-        
-        # 6. 执行识别
+
+        # 5. 执行识别（使用依赖注入的服务）
         logger.info(f"开始语音识别，PCM数据大小: {len(pcm_data)} bytes")
         result: STTResult = await stt_service.recognize(pcm_data)
         
@@ -272,7 +208,10 @@ async def recognize_speech(
     summary="语音合成",
     description="将文本转换为语音（支持流式合成，失败时返回JSON文本）"
 )
-async def synthesize_speech(request: TTSRequest):
+async def synthesize_speech(
+    request: TTSRequest,
+    tts_service: IFlytekTTSStreamingService = Depends(get_tts_service)
+):
     """
     文字转语音接口（流式合成）
     
@@ -362,13 +301,10 @@ async def synthesize_speech(request: TTSRequest):
                     "format": request.format
                 }
             )
-        
+
         logger.info(f"收到TTS合成请求: 文本长度={len(request.text)}, 发音人={request.voice}")
-        
-        # 2. 获取TTS服务
-        tts_service = get_tts_streaming_service()
-        
-        # 3. 执行合成
+
+        # 执行合成（使用依赖注入的服务）
         try:
             audio_data = await tts_service.synthesize(
                 text=request.text,
@@ -427,7 +363,10 @@ async def synthesize_speech(request: TTSRequest):
     summary="语音合成（流式）",
     description="将文本转换为语音，以流式方式实时返回音频数据"
 )
-async def synthesize_speech_stream(request: TTSRequest):
+async def synthesize_speech_stream(
+    request: TTSRequest,
+    tts_service: IFlytekTTSStreamingService = Depends(get_tts_service)
+):
     """
     文字转语音接口（流式版本）
     
@@ -547,13 +486,10 @@ async def synthesize_speech_stream(request: TTSRequest):
                 status_code=400,
                 detail=f"文本过长: {len(request.text)} 字符 (流式模式最大 {max_length})"
             )
-        
+
         logger.info(f"收到流式TTS请求: 文本长度={len(request.text)}, 发音人={request.voice}")
-        
-        # 2. 获取流式TTS服务
-        tts_service = get_tts_streaming_service()
-        
-        # 3. 创建异步生成器
+
+        # 创建异步生成器（使用依赖注入的服务）
         async def audio_stream_generator():
             """生成音频流"""
             try:
@@ -604,7 +540,9 @@ async def synthesize_speech_stream(request: TTSRequest):
     summary="语音服务状态",
     description="获取STT/TTS服务状态"
 )
-async def get_voice_status() -> dict:
+async def get_voice_status(
+    request: Request
+) -> dict:
     """
     获取语音服务状态
     
@@ -629,23 +567,23 @@ async def get_voice_status() -> dict:
     ```
     """
     try:
-        # 检查STT服务
+        # 检查STT服务（使用依赖注入）
         stt_available = False
         stt_error = None
-        
+
         try:
-            stt_service = get_stt_service()
+            stt_service = get_stt_service(request)
             stt_available = await stt_service.is_available()
         except Exception as e:
             stt_error = str(e)
-        
-        # 检查TTS服务
+
+        # 检查TTS服务（使用依赖注入）
         tts_available = False
         tts_error = None
         tts_voice = None
-        
+
         try:
-            tts_service = get_tts_streaming_service()
+            tts_service = get_tts_service(request)
             tts_available = await tts_service.is_available()
             tts_voice = tts_service.voice
         except Exception as e:

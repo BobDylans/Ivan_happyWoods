@@ -10,6 +10,12 @@ import logging
 import asyncio
 from pathlib import Path
 
+# 设置控制台输出为 UTF-8 编码（Windows 兼容）
+if sys.platform == "win32":
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 # 添加 src 目录到 Python 路径
 project_root = Path(__file__).parent
 src_path = project_root / "src"
@@ -24,60 +30,70 @@ def setup_logging():
     # Create logs directory if it doesn't exist
     Path("logs").mkdir(exist_ok=True)
     
+    # Create console handler with UTF-8 encoding
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    
+    # Create file handler with UTF-8 encoding
+    file_handler = logging.FileHandler("logs/voice-agent-api.log", mode="a", encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    
+    # Create formatter
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    console_handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
+    
+    # Configure root logger
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler("logs/voice-agent-api.log", mode="a")
-        ]
+        handlers=[console_handler, file_handler]
     )
 
 
 async def check_dependencies():
     """Check if all required dependencies are available."""
-    print("🔍 检查依赖...")
-    
+    print("[Checking] Dependencies...")
+
     # Load environment variables first
     try:
         from dotenv import load_dotenv
         env_file = Path(".env")
         if env_file.exists():
             load_dotenv(env_file)
-            print("✅ 环境变量已从 .env 加载")
+            print("[OK] Environment variables loaded from .env")
         else:
-            print("⚠️  .env 文件未找到，使用系统环境变量")
+            print("[WARN] .env file not found, using system environment variables")
     except Exception as e:
-        print(f"⚠️  dotenv: {e}")
-    
+        print(f"[WARN] dotenv: {e}")
+
     # Check configuration
     try:
         from config.settings import get_config
 
         config = get_config()
-        print(f"✅ Configuration: OK (Environment: {config.environment})")
-        print(f"   LLM: {config.llm.provider.value} - {config.llm.models.default}")
-        print(f"   Voice: STT={config.speech.stt.provider.value}, TTS={config.speech.tts.provider.value}")
+        print(f"[OK] Configuration: OK (Environment: {config.environment})")
+        print(f"     LLM: {config.llm.provider.value} - {config.llm.models.default}")
+        print(f"     Voice: STT={config.speech.stt.provider.value}, TTS={config.speech.tts.provider.value}")
     except Exception as e:
-        print(f"❌ Configuration: {e}")
+        print(f"[ERROR] Configuration: {e}")
         return False
-    
+
     # Check agent core
     try:
         from agent.state import create_initial_state
         from agent.nodes import AgentNodes
-        print("✅ Agent core: OK")
+        print("[OK] Agent core: OK")
     except Exception as e:
-        print(f"⚠️  Agent core: {e}")
-    
+        print(f"[WARN] Agent core: {e}")
+
     # Check FastAPI
     try:
         from fastapi import FastAPI
-        print("✅ FastAPI: OK")
+        print("[OK] FastAPI: OK")
     except Exception as e:
-        print(f"❌ FastAPI: {e}")
+        print(f"[ERROR] FastAPI: {e}")
         return False
-    
+
     return True
 
 
@@ -107,16 +123,15 @@ def main():
             "api.main:app",
             host="127.0.0.1",
             port=8000,
-            reload=True,
+            reload=False,  # Disable reload for stability
             log_level="info",
-            access_log=True,
-            reload_dirs=["src"]
+            access_log=True
         )
         
     except KeyboardInterrupt:
-        print("\n🛑 Server stopped by user")
+        print("\n[STOP] Server stopped by user")
     except Exception as e:
-        print(f"❌ Server error: {e}")
+        print(f"[ERROR] Server error: {e}")
         sys.exit(1)
 
 

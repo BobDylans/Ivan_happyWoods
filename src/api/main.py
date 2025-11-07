@@ -16,7 +16,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.openapi.utils import get_openapi
 
-from .routes import chat_router, session_router, health_router, tools_router, rag_router, set_voice_agent
+from .routes import chat_router, session_router, health_router, tools_router, rag_router
 from .voice_routes import voice_router
 from .conversation_routes import conversation_router
 from .auth_routes import router as auth_router  # 🔧 添加认证路由
@@ -24,10 +24,13 @@ from .session_routes import router as session_management_router  # 🔧 添加�
 from .models import ErrorResponse
 from .auth import APIKeyMiddleware
 from .middleware import (
-    RateLimitMiddleware, 
-    SecurityHeadersMiddleware, 
+    RateLimitMiddleware,
+    SecurityHeadersMiddleware,
     RequestValidationMiddleware
 )
+
+# 使用新的依赖注入系统
+from core.dependencies import AppState
 
 # fastAPI中提到的中间件相当于java中的过滤器
 # Configure logging
@@ -47,156 +50,139 @@ async def lifespan(app: FastAPI):
     # 🚀 优化1: 集中配置管理 - 一次性加载配置到app.state
     try:
         import os
-        from config.settings import get_config
-        app.state.config = get_config()
+        from config.settings import load_config
+        config = load_config()
+        AppState.set_config(app, config)
         logger.info("✅ Configuration loaded and cached in app.state")
-        
+
         # 设置 API Keys 到环境变量（如果配置中有）
-        if hasattr(app.state.config, 'security') and hasattr(app.state.config.security, 'api_keys'):
-            api_keys = app.state.config.security.api_keys
+        if hasattr(config, 'security') and hasattr(config.security, 'api_keys'):
+            api_keys = config.security.api_keys
             if api_keys:
                 os.environ['API_KEYS'] = ','.join(api_keys)
                 logger.info(f"✅ API keys loaded from config: {len(api_keys)} key(s)")
     except Exception as e:
         logger.error(f"Failed to load configuration: {e}")
         raise
-    
+
     # Initialize MCP tools
     try:
         from mcp.init_tools import initialize_default_tools
+        from mcp.registry import ToolRegistry
+
+        # 创建并注册 tool registry
+        tool_registry = ToolRegistry()
+        AppState.set_tool_registry(app, tool_registry)
+
         # 🔧 Pass config to tools for Tavily API integration
-        config_dict = app.state.config.model_dump() if hasattr(app.state.config, 'model_dump') else {}
+        config_dict = config.model_dump() if hasattr(config, 'model_dump') else {}
         registered_tools = initialize_default_tools(config=config_dict)
         logger.info(f"Initialized {len(registered_tools)} MCP tools: {', '.join(registered_tools)}")
     except Exception as e:
         logger.warning(f"Could not initialize MCP tools: {e}")
-    
-    # Initialize voice agent
+
+    # Initialize database
     try:
-        # Import with fallback handling
-        try:
-            from agent.graph import create_voice_agent
-            agent = create_voice_agent()  # 移除 environment 参数，现在从 .env 自动加载
-            set_voice_agent(agent)
-            logger.info("Voice agent initialized successfully")
-            
-            # Initialize conversation service
-            try:
-                from services.conversation_service import initialize_conversation_service
-                from .voice_routes import get_stt_service, get_tts_streaming_service
-                
-                stt_service = get_stt_service()
-                tts_service = get_tts_streaming_service()
-                
-                # Initialize conversation service (will be used by routes)
-                _ = initialize_conversation_service(
-                    agent=agent,
-                    stt_service=stt_service,
-                    tts_service=tts_service
-                )
-                logger.info("Conversation service initialized successfully")
-            except Exception as e:
-                logger.warning(f"Could not initialize conversation service: {e}")
-                logger.info("Conversation endpoints will not be available")
-                
-        except Exception as e:
-            logger.warning(f"Could not initialize voice agent: {e}")
-            logger.info("API will run in degraded mode without agent functionality")
-    except ImportError:
-        logger.warning("Agent modules not available - running in mock mode")
-    
-    # 初始化 Session Manager（支持自动降级）
-    try:
-        from utils.session_manager import HybridSessionManager
-        from database.repositories import ConversationRepository
-        from database.connection import init_db, create_tables, get_db_engine
-        from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
-        from config.settings import ConfigManager
-        
-        # 加载配置
-        config_manager = ConfigManager()
-        config = config_manager.get_config()
-        
-        # 尝试初始化数据库
-        db_engine = None
+        from database.connection import init_db, create_tables
+
         if config.database.enabled:
             logger.info("🔌 Attempting to connect to database...")
-            db_engine = await init_db(config.database)
-            
-            if db_engine:
+            db_engine, db_session_factory = await init_db(config.database)
+
+            if db_engine and db_session_factory:
+                # 设置到 app.state
+                AppState.set_database(app, db_engine, db_session_factory)
+
                 # 创建表
                 try:
-                    await create_tables()
+                    await create_tables(db_engine)
                     logger.info("✅ Database tables created/verified")
                 except Exception as e:
                     logger.warning(f"⚠️ Table creation warning: {e}")
-        
-        # 初始化 Session Manager
-        if db_engine:
-            # 数据库可用，使用混合模式
-            async_session_maker = async_sessionmaker(
-                db_engine,
-                class_=AsyncSession,
-                expire_on_commit=False
-            )
-            db_session = async_session_maker()
-            conversation_repo = ConversationRepository(db_session)
-            
-            app.state.session_manager = HybridSessionManager(
-                conversation_repo=conversation_repo,
-                memory_limit=20,
-                ttl_hours=24,
-                enable_database=True
-            )
-            
-            app.state.db_engine = db_engine
-            app.state.db_session = db_session
-            logger.info("✅ SessionManager initialized (memory + database)")
+            else:
+                logger.warning("⚠️ Database connection failed, will use memory-only mode")
         else:
-            # 数据库不可用，使用纯内存模式
-            app.state.session_manager = HybridSessionManager(
+            logger.info("📝 Database disabled in configuration, using memory-only mode")
+
+    except Exception as e:
+        logger.error(f"❌ Database initialization error: {e}")
+        logger.info("Will continue with memory-only mode")
+
+    # Initialize voice agent
+    try:
+        from agent.graph import create_voice_agent
+        agent = create_voice_agent()  # 现在从 .env 自动加载
+        AppState.set_voice_agent(app, agent)
+        logger.info("✅ Voice agent initialized successfully")
+
+    except Exception as e:
+        logger.warning(f"Could not initialize voice agent: {e}")
+        logger.info("API will run in degraded mode without agent functionality")
+
+    # Initialize Session Manager (supports automatic fallback)
+    try:
+        from utils.session_manager import HybridSessionManager
+        from database.repositories import ConversationRepository
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        # Check if database is available
+        if hasattr(app.state, 'db_session_factory'):
+            # Database available, use hybrid mode
+            async with app.state.db_session_factory() as db_session:
+                conversation_repo = ConversationRepository(db_session)
+
+                session_manager = HybridSessionManager(
+                    conversation_repo=conversation_repo,
+                    memory_limit=20,
+                    ttl_hours=24,
+                    enable_database=True
+                )
+                AppState.set_session_manager(app, session_manager)
+                logger.info("✅ SessionManager initialized (memory + database)")
+        else:
+            # Database not available, use memory-only mode
+            session_manager = HybridSessionManager(
                 conversation_repo=None,
                 memory_limit=20,
                 ttl_hours=24,
                 enable_database=False
             )
+            AppState.set_session_manager(app, session_manager)
             logger.info("✅ SessionManager initialized (memory-only mode)")
-        
+
     except Exception as e:
         logger.error(f"❌ Failed to initialize session manager: {e}")
         logger.warning("⚠️ Using fallback session manager")
-        
-        # 最后的降级方案：纯内存管理器（使用别名 SessionHistoryManager）
+
+        # Last fallback: pure memory manager
         try:
             from utils.session_manager import SessionHistoryManager
-            app.state.session_manager = SessionHistoryManager(max_history=20, ttl_hours=24)
+            session_manager = SessionHistoryManager(max_history=20, ttl_hours=24)
+            AppState.set_session_manager(app, session_manager)
             logger.info("✅ SessionManager initialized (fallback mode)")
         except Exception as fallback_error:
             logger.error(f"Failed to initialize fallback session manager: {fallback_error}")
             raise
     
     logger.info("Voice Agent API service started successfully")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down Voice Agent API service...")
-    
-    # 清理数据库资源
+
+    # Clean up database resources
     try:
-        # 关闭数据库 session
-        if hasattr(app.state, 'db_session'):
-            await app.state.db_session.close()
-            logger.info("✅ Database session closed")
-        
-        # 关闭数据库引擎
-        if hasattr(app.state, 'db_engine'):
-            await app.state.db_engine.dispose()
-            logger.info("✅ Database engine disposed")
-            
+        from database.connection import close_db
+
+        # Close database engine if available
+        if hasattr(app.state, 'db_engine') and app.state.db_engine is not None:
+            await close_db(app.state.db_engine)
+            logger.info("✅ Database connection closed")
+
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")
-    
+
     logger.info("Voice Agent API service stopped")
 
 

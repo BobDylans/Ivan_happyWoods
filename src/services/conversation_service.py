@@ -442,39 +442,20 @@ class ConversationService:
             }
 
 
-# 全局服务实例
-_conversation_service: Optional[ConversationService] = None
-
-
-def initialize_conversation_service(
-    agent: VoiceAgent,
-    stt_service: IFlyTekSTTService,
-    tts_service: IFlytekTTSStreamingService
-) -> ConversationService:
-    """
-    初始化对话服务（单例）
-    
-    Args:
-        agent: 智能体实例
-        stt_service: STT服务实例
-        tts_service: TTS流式服务实例
-    
-    Returns:
-        ConversationService实例
-    """
-    global _conversation_service
-    
-    if _conversation_service is None:
-        _conversation_service = ConversationService(
-            agent=agent,
-            stt_service=stt_service,
-            tts_service=tts_service
-        )
-        logger.info("全局 ConversationService 已初始化")
-    
-    return _conversation_service
-
-
 def get_conversation_service() -> Optional[ConversationService]:
-    """获取全局对话服务实例"""
-    return _conversation_service
+    """
+    [已弃用] 获取全局对话服务实例
+
+    警告：此函数仅用于向后兼容，未来版本将移除。
+    请使用 core.dependencies.get_conversation_service() 通过依赖注入获取实例。
+
+    Returns:
+        ConversationService 实例
+
+    Raises:
+        RuntimeError: 始终抛出，因为不再使用全局变量
+    """
+    raise RuntimeError(
+        "get_conversation_service() is deprecated and no longer uses global state. "
+        "Use core.dependencies.get_conversation_service(request) with dependency injection instead."
+    )

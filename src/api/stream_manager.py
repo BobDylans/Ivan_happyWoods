@@ -76,13 +76,20 @@ class StreamTaskManager:
             return len(completed)
 
 
-# Global instance
-_stream_manager: Optional[StreamTaskManager] = None
-
-
 def get_stream_manager() -> StreamTaskManager:
-    """Get or create the global stream manager instance."""
-    global _stream_manager
-    if _stream_manager is None:
-        _stream_manager = StreamTaskManager()
-    return _stream_manager
+    """
+    [已弃用] 获取全局流管理器实例
+
+    警告：此函数仅用于向后兼容，未来版本将移除。
+    请使用 core.dependencies.get_stream_manager() 通过依赖注入获取实例。
+
+    Returns:
+        StreamTaskManager 实例
+
+    Raises:
+        RuntimeError: 始终抛出，因为不再使用全局变量
+    """
+    raise RuntimeError(
+        "get_stream_manager() is deprecated and no longer uses global state. "
+        "Use core.dependencies.get_stream_manager(request) with dependency injection instead."
+    )

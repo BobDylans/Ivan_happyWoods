@@ -82,5 +82,5 @@ MIT License - 详见 [LICENSE](LICENSE)
 
 ---
 
-*Version: 0.3.0 | Last Updated: 2025-10-29*
+*Version: 0.3.1 | Last Updated: 2025-11-08*
 

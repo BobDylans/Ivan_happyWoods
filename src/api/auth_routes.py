@@ -28,8 +28,8 @@ from services.auth_service import (
     decode_token,
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES
 )
-# 🔧 延迟导入 get_session，避免在模块加载时访问未初始化的数据库
 from database.repositories.user_repository import UserRepository
+from core.dependencies import get_db_session
 
 
 # ============================================
@@ -40,20 +40,6 @@ router = APIRouter()
 
 # OAuth2 Password Bearer for JWT authentication
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
-
-
-# ============================================
-# Database Session Dependency (Lazy Loading)
-# ============================================
-
-async def get_db_session():
-    """
-    获取数据库 session 的依赖注入函数
-    延迟导入 get_session，避免在模块加载时访问未初始化的数据库
-    """
-    from database.connection import get_session
-    async for session in get_session():
-        yield session
 
 
 # ============================================

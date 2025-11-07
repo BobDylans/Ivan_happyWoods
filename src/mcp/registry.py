@@ -14,25 +14,18 @@ logger = logging.getLogger(__name__)
 class ToolRegistry:
     """
     Registry for managing MCP tools.
-    
+
     Provides tool registration, discovery, and execution management.
-    Singleton pattern ensures single global registry instance.
+
+    Note:
+        不再使用单例模式。实例应该在应用启动时创建并存储到 app.state。
+        使用 core.dependencies.get_tool_registry() 通过依赖注入获取实例。
     """
-    
-    _instance: Optional["ToolRegistry"] = None
-    
+
     def __init__(self):
         """Initialize the tool registry."""
         self._tools: Dict[str, Tool] = {}
         logger.info("Tool registry initialized")
-    
-    @classmethod
-    # 首先是获取单例
-    def get_instance(cls) -> "ToolRegistry":
-        """Get singleton registry instance."""
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
     # 之后实现注册
     def register(self, tool: Tool) -> None:
         """
@@ -166,13 +159,20 @@ class ToolRegistry:
         return f"<ToolRegistry: {len(self)} tools registered>"
 
 
-# 获得全局变量的单例工具
 def get_tool_registry() -> ToolRegistry:
     """
-    Get the global tool registry instance.
-    
+    [已弃用] 获取全局工具注册表实例
+
+    警告：此函数仅用于向后兼容，未来版本将移除。
+    请使用 core.dependencies.get_tool_registry() 通过依赖注入获取实例。
+
     Returns:
-        Singleton ToolRegistry instance
+        ToolRegistry 实例
+
+    Raises:
+        RuntimeError: 始终抛出，因为不再使用全局单例
     """
-    # 调用类内部的方法来返回单例
-    return ToolRegistry.get_instance()
+    raise RuntimeError(
+        "get_tool_registry() is deprecated and no longer uses global state. "
+        "Use core.dependencies.get_tool_registry(request) with dependency injection instead."
+    )

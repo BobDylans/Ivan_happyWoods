@@ -28,7 +28,15 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
 
-from .stream_manager import get_stream_manager
+# 使用新的依赖注入系统
+from core.dependencies import (
+    get_config,
+    get_voice_agent,
+    get_session_manager,
+    get_stream_manager as get_stream_manager_dep,
+    get_db_session,
+)
+from sqlalchemy.ext.asyncio import AsyncSession
 from .event_utils import create_start_event, create_end_event, create_cancelled_event, create_error_event
 from .models import (
     ChatRequest, ChatResponse, SessionRequest, SessionResponse,
@@ -48,13 +56,13 @@ except ImportError:
     create_voice_agent = None
     AgentMessageRole = None
 
+# Config availability check
 try:
-    from config.settings import ConfigManager, get_config
+    from config.models import VoiceAgentConfig
     CONFIG_AVAILABLE = True
 except ImportError:
     CONFIG_AVAILABLE = False
-    ConfigManager = None
-    get_config = None  # type: ignore
+    VoiceAgentConfig = None  # type: ignore
 
 from rag.ingestion import SUPPORTED_SUFFIXES, configure_proxy_bypass, ingest_files
 
@@ -62,36 +70,10 @@ from rag.ingestion import SUPPORTED_SUFFIXES, configure_proxy_bypass, ingest_fil
 logger = logging.getLogger(__name__)
 
 
-# Global agent instance (will be initialized in main.py)
-_voice_agent = None
+# Application start time (reasonable application constant)
 _start_time = datetime.now()
-_session_store: Dict[str, Dict[str, Any]] = {}  # Simple in-memory session store
-
-
-def get_voice_agent():
-    """Dependency to get the voice agent instance."""
-    global _voice_agent
-    if _voice_agent is None:
-        if AGENT_AVAILABLE:
-            try:
-                _voice_agent = create_voice_agent()  # 移除 environment 参数，现在从 .env 自动加载
-            except Exception as e:
-                logger.warning(f"Could not create voice agent: {e}")
-                _voice_agent = None
-        else:
-            logger.warning("Agent functionality not available")
-    return _voice_agent
-
-
-def set_voice_agent(agent):
-    """Set the global voice agent instance."""
-    global _voice_agent
-    _voice_agent = agent
-
-
-def get_session_manager(request: Request):
-    """Dependency to get the session manager from app.state."""
-    return request.app.state.session_manager
+# Session store for backward compatibility (will be moved to proper session manager)
+_session_store: Dict[str, Dict[str, Any]] = {}
 
 
 # Create routers
@@ -353,12 +335,12 @@ async def chat_ws(websocket: WebSocket, agent = Depends(get_voice_agent)):
     if agent is None:
         await websocket.close(code=1013)
         return
-    
+
     await websocket.accept()
-    stream_manager = get_stream_manager()
-    
+    stream_manager = get_stream_manager_dep(websocket)
+
     # 🔧 获取 session_manager
-    session_manager = websocket.app.state.session_manager
+    session_manager = get_session_manager(websocket)
     
     current_session_id: Optional[str] = None
     
@@ -700,37 +682,37 @@ async def clear_session(session_id: str, request: Request):
 
 
 @health_router.get("/", response_model=HealthResponse)
-async def health_check() -> HealthResponse:
+async def health_check(request: Request) -> HealthResponse:
     """
     System health check endpoint.
-    
+
     Returns comprehensive health status of all system components.
     """
     try:
         current_time = datetime.now()
         uptime = (current_time - _start_time).total_seconds()
-        
+
         components = []
         overall_status = HealthStatus.HEALTHY
-        
-        # Check agent core
-        agent_health = await _check_agent_health()
+
+        # Check agent core (with dependency injection)
+        agent_health = await _check_agent_health(request)
         components.append(agent_health)
         if agent_health.status != HealthStatus.HEALTHY:
             overall_status = HealthStatus.DEGRADED
-        
+
         # Check configuration system
         config_health = _check_config_health()
         components.append(config_health)
         if config_health.status != HealthStatus.HEALTHY and overall_status == HealthStatus.HEALTHY:
             overall_status = HealthStatus.DEGRADED
-        
+
         # Check session store
         session_health = _check_session_health()
         components.append(session_health)
 
-        # Check RAG / Qdrant connectivity
-        rag_health = await _check_rag_health()
+        # Check RAG / Qdrant connectivity (with dependency injection)
+        rag_health = await _check_rag_health(request)
         components.append(rag_health)
         if rag_health.status == HealthStatus.UNHEALTHY and overall_status == HealthStatus.HEALTHY:
             overall_status = HealthStatus.DEGRADED
@@ -764,12 +746,12 @@ async def health_check() -> HealthResponse:
         )
 
 
-async def _check_agent_health() -> ComponentHealth:
+async def _check_agent_health(request: Request) -> ComponentHealth:
     """Check agent core health."""
     start_time = time.time()
-    
+
     try:
-        agent = get_voice_agent()
+        agent = get_voice_agent(request)
         if agent is None:
             return ComponentHealth(
                 name="agent_core",
@@ -854,12 +836,12 @@ def _check_session_health() -> ComponentHealth:
         )
 
 
-async def _check_rag_health() -> ComponentHealth:
+async def _check_rag_health(request: Request) -> ComponentHealth:
     """Check Qdrant RAG subsystem."""
 
     start_time = time.time()
     try:
-        if not CONFIG_AVAILABLE or get_config is None:
+        if not CONFIG_AVAILABLE:
             return ComponentHealth(
                 name="rag",
                 status=HealthStatus.DEGRADED,
@@ -868,7 +850,17 @@ async def _check_rag_health() -> ComponentHealth:
                 last_check=datetime.now(),
             )
 
-        config = get_config()
+        try:
+            config = get_config(request)
+        except Exception as e:
+            return ComponentHealth(
+                name="rag",
+                status=HealthStatus.DEGRADED,
+                message=f"Config unavailable: {e}",
+                response_time_ms=(time.time() - start_time) * 1000,
+                last_check=datetime.now(),
+            )
+
         if not config.rag.enabled:
             return ComponentHealth(
                 name="rag",
@@ -918,17 +910,17 @@ async def _check_rag_health() -> ComponentHealth:
 # ===========================
 
 @tools_router.get("/")
-async def list_tools():
+async def list_tools(request: Request):
     """
     List all available MCP tools.
-    
+
     Returns information about registered tools including their names,
     descriptions, and parameter schemas.
     """
     try:
-        from src.mcp import get_tool_registry
-        
-        registry = get_tool_registry()
+        from core.dependencies import get_tool_registry
+
+        registry = get_tool_registry(request)
         tools = registry.list_tools()
         
         tool_info = []
@@ -964,16 +956,16 @@ async def list_tools():
 
 
 @tools_router.get("/schemas")
-async def get_tool_schemas():
+async def get_tool_schemas(request: Request):
     """
     Get OpenAI-compatible function calling schemas for all tools.
-    
+
     Returns schemas that can be used with OpenAI's function calling API.
     """
     try:
-        from src.mcp import get_tool_registry
-        
-        registry = get_tool_registry()
+        from core.dependencies import get_tool_registry
+
+        registry = get_tool_registry(request)
         schemas = registry.get_schemas()
         
         return {
@@ -992,17 +984,17 @@ async def get_tool_schemas():
 
 
 @tools_router.post("/execute/{tool_name}")
-async def execute_tool(tool_name: str, parameters: Dict[str, Any]):
+async def execute_tool(tool_name: str, parameters: Dict[str, Any], request: Request):
     """
     Manually execute a specific tool with parameters.
-    
+
     This endpoint allows direct tool invocation for testing and debugging.
     In normal operation, tools are called automatically by the LLM.
     """
     try:
-        from src.mcp import get_tool_registry
-        
-        registry = get_tool_registry()
+        from core.dependencies import get_tool_registry
+
+        registry = get_tool_registry(request)
         result = await registry.execute(tool_name, **parameters)
         
         return {
@@ -1028,6 +1020,7 @@ async def _handle_rag_upload(
     corpus_id: Optional[str],
     collection_name: Optional[str],
     require_user_id: bool,
+    db_session: Optional[Any] = None,
 ) -> RAGUploadResponse:
     rag_cfg = config.rag
 
@@ -1119,6 +1112,7 @@ async def _handle_rag_upload(
             display_names={str(path): saved_files[path] for path in file_paths},
             recreate=False,
             batch_size=rag_cfg.ingest_batch_size,
+            db_session=db_session,
         )
     except ValueError as exc:
         logger.error("RAG ingestion failed: %s", exc)
@@ -1182,20 +1176,22 @@ async def _handle_rag_upload(
 
 @rag_router.post("/upload", response_model=RAGUploadResponse)
 async def upload_documents(
+    request: Request,
     files: List[UploadFile] = File(...),
     user_id: Optional[str] = None,
     corpus_name: Optional[str] = None,
     corpus_description: Optional[str] = None,
     corpus_id: Optional[str] = None,
     collection_name: Optional[str] = None,
+    db_session: AsyncSession = Depends(get_db_session),
 ) -> RAGUploadResponse:
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
 
-    if not CONFIG_AVAILABLE or get_config is None:
+    if not CONFIG_AVAILABLE:
         raise HTTPException(status_code=503, detail="Configuration system unavailable")
 
-    config = get_config()
+    config = get_config(request)
 
     return await _handle_rag_upload(
         files,
@@ -1206,11 +1202,13 @@ async def upload_documents(
         corpus_id=corpus_id,
         collection_name=collection_name,
         require_user_id=False,
+        db_session=db_session,
     )
 
 
 @rag_router.post("/user/upload", response_model=RAGUploadResponse)
 async def upload_user_documents(
+    request: Request,
     files: List[UploadFile] = File(...),
     user_id: str = Form(..., description="User UUID owning the uploaded documents"),
     corpus_name: Optional[str] = Form(
@@ -1229,14 +1227,15 @@ async def upload_user_documents(
         default=None,
         description="Override the resolved collection name",
     ),
+    db_session: AsyncSession = Depends(get_db_session),
 ) -> RAGUploadResponse:
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
 
-    if not CONFIG_AVAILABLE or get_config is None:
+    if not CONFIG_AVAILABLE:
         raise HTTPException(status_code=503, detail="Configuration system unavailable")
 
-    config = get_config()
+    config = get_config(request)
 
     return await _handle_rag_upload(
         files,
@@ -1247,4 +1246,5 @@ async def upload_user_documents(
         corpus_id=corpus_id,
         collection_name=collection_name,
         require_user_id=True,
+        db_session=db_session,
     )

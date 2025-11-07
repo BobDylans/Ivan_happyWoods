@@ -42,14 +42,14 @@ except ImportError:
 
 try:
     from config.models import VoiceAgentConfig
-    from config.settings import ConfigManager
+    from config.settings import load_config
 except ImportError:
     # Fallback for when running as script
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from config.models import VoiceAgentConfig
-    from config.settings import ConfigManager
+    from config.settings import load_config
 
 
 logger = logging.getLogger(__name__)
@@ -480,7 +480,8 @@ class VoiceAgent:
             node_start_time = time.time()
 
             # 检索 RAG 结果并构造带知识上下文的消息
-            rag_results = await self.nodes._retrieve_rag_snippets(state)
+            # 通过 _llm_streamer 访问 RAG 方法（它继承自 AgentNodesBase）
+            rag_results = await self.nodes._llm_streamer._retrieve_rag_snippets(state)
             if state.get("rag_snippets"):
                 yield {
                     "type": "rag_snippets",
@@ -489,27 +490,9 @@ class VoiceAgent:
                 }
 
             external_history_for_llm = state.get("external_history")
-            messages = self.nodes._prepare_llm_messages(state, external_history=external_history_for_llm)
-
-            if rag_results and self.nodes._rag_service:
-                rag_prompt = self.nodes._rag_service.build_prompt(rag_results)
-                if rag_prompt:
-                    system_message = {"role": "system", "content": rag_prompt}
-                    if messages and messages[-1].get("role") == "user":
-                        messages.insert(len(messages) - 1, system_message)
-                    else:
-                        messages.append(system_message)
-
-            model = state["model_config"].get("model", self.config.llm.models.default)
-            llm_config = prepare_llm_params(
-                model=model,
-                messages=messages,
-                temperature=state.get("temperature", self.config.llm.temperature),
-                max_tokens=state.get("max_tokens", self.config.llm.max_tokens)
-            )
-
-            # 流式调用 LLM（内部会发射 Node 层事件）
-            async for event in self.nodes.stream_llm_call(messages, llm_config, session_id=session_id):
+            
+            # 流式调用 LLM（内部会自动处理 RAG、消息构建等）
+            async for event in self.nodes.stream_llm_call(state, external_history=external_history_for_llm):
                 # 收集 delta 片段
                 if event.get("type") == "delta" and "content" in event:
                     accumulated_content.append(event["content"])
@@ -662,19 +645,15 @@ def create_voice_agent(config_path: Optional[str] = None) -> VoiceAgent:
     try:
         # Load configuration
         if config_path:
-            config_manager = ConfigManager(config_path)
+            config = load_config(env_file=config_path)
         else:
-            from pathlib import Path
-            default_config_path = Path(__file__).parent.parent.parent / "config"
-            config_manager = ConfigManager(default_config_path)
-        
-        config = config_manager.load_config()  # 移除 environment 参数，现在从 .env 自动加载
-        
+            config = load_config()  # Use default config location
+
         # 创建并返回代理
         agent = VoiceAgent(config)
         logger.info(f"语音代理使用配置创建成功")
         return agent
-        
+
     except Exception as e:
         logger.error(f"创建语音代理时出错: {e}")
         raise

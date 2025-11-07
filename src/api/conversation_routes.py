@@ -20,7 +20,7 @@ from services.conversation_service import (
     InputMode,
     OutputMode
 )
-from database.connection import get_session
+from core.dependencies import get_db_session
 from database.repositories.session_repository import SessionRepository
 from database.repositories.message_repository import MessageRepository
 from api.models import (
@@ -36,16 +36,6 @@ from database.models import User
 
 
 logger = logging.getLogger(__name__)
-
-
-# ============================================
-# Database Dependency (使用统一的 get_session)
-# ============================================
-
-async def get_db():
-    """数据库会话依赖（兼容层）"""
-    async for session in get_session():
-        yield session
 
 
 # 自定义 JSON 编码器处理 datetime 对象
@@ -696,7 +686,7 @@ async def send_authenticated_message(
     request: ConversationRequest,
     current_user: User = Depends(get_current_user),
     service: ConversationService = Depends(get_conv_service),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_session),
     fastapi_request: Request = None
 ) -> ConversationResponse:
     """
@@ -821,7 +811,7 @@ async def send_authenticated_message(
 )
 async def create_new_session(
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db_session),
     request: SessionCreateRequest = Body(default=None)
 ):
     """
@@ -890,7 +880,7 @@ async def get_user_sessions(
     page_size: int = 20,
     status: Optional[str] = None,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     获取当前用户的会话列表
@@ -969,7 +959,7 @@ async def get_user_sessions(
 async def get_session_detail(
     session_id: str,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     获取会话详情

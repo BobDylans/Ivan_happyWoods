@@ -20,114 +20,65 @@ class ConfigurationError(Exception):
     pass
 
 
-class ConfigManager:
+def load_config(env_file: Optional[Path] = None) -> VoiceAgentConfig:
     """
-    Configuration manager that handles loading from environment variables.
-    
-    Supports:
-    - .env file loading
-    - Environment variable parsing
-    - Configuration validation
-    - Singleton pattern for caching
+    Load configuration from environment variables.
+
+    Args:
+        env_file: Path to .env file. Defaults to .env in project root.
+
+    Returns:
+        Validated configuration object
+
+    Raises:
+        ConfigurationError: If configuration loading or validation fails
+
+    Note:
+        不再使用全局单例模式。配置应该在应用启动时加载并存储到 app.state。
+        使用 core.dependencies.get_config() 通过依赖注入获取配置。
     """
-    
-    def __init__(self, env_file: Optional[Path] = None):
-        """
-        Initialize configuration manager.
-        
-        Args:
-            env_file: Path to .env file. Defaults to .env in project root.
-        """
-        self.env_file = env_file or Path(__file__).parent.parent.parent / ".env"
-        self.config: Optional[VoiceAgentConfig] = None
-        
-        logger.info(f"ConfigManager initialized with env_file: {self.env_file}")
-    
-    def load_config(self) -> VoiceAgentConfig:
-        """
-        Load configuration from environment variables.
-        
-        Returns:
-            Validated configuration object
-            
-        Raises:
-            ConfigurationError: If configuration loading or validation fails
-        """
-        try:
-            # Pydantic Settings automatically loads from .env
-            self.config = VoiceAgentConfig()
-            
-            logger.info("Configuration loaded successfully")
-            logger.info(f"  Environment: {self.config.environment}")
-            logger.info(f"  LLM Provider: {self.config.llm.provider}")
-            logger.info(f"  LLM Base URL: {self.config.llm.base_url}")
-            logger.info(f"  Default Model: {self.config.llm.models.default}")
-            logger.info(f"  API Host: {self.config.api.host}:{self.config.api.port}")
-            
-            return self.config
-            
-        except ValidationError as e:
-            error_msg = f"Configuration validation failed: {e}"
-            logger.error(error_msg)
-            raise ConfigurationError(error_msg) from e
-        except Exception as e:
-            error_msg = f"Failed to load configuration: {str(e)}"
-            logger.error(error_msg)
-            raise ConfigurationError(error_msg) from e
-    
-    def get_config(self) -> VoiceAgentConfig:
-        """
-        Get current configuration, loading if not already loaded.
-        
-        Returns:
-            Current configuration object
-            
-        Raises:
-            ConfigurationError: If no configuration is loaded
-        """
-        if self.config is None:
-            self.load_config()
-        return self.config
-    
-    def reload_config(self) -> VoiceAgentConfig:
-        """
-        Force reload configuration from environment variables.
-        
-        Returns:
-            Reloaded configuration object
-        """
-        logger.info("Force reloading configuration...")
-        self.config = None
-        return self.load_config()
+    env_file = env_file or Path(__file__).parent.parent.parent / ".env"
+
+    try:
+        # Pydantic Settings automatically loads from .env
+        config = VoiceAgentConfig()
+
+        logger.info("Configuration loaded successfully")
+        logger.info(f"  Environment: {config.environment}")
+        logger.info(f"  LLM Provider: {config.llm.provider}")
+        logger.info(f"  LLM Base URL: {config.llm.base_url}")
+        logger.info(f"  Default Model: {config.llm.models.default}")
+        logger.info(f"  API Host: {config.api.host}:{config.api.port}")
+
+        return config
+
+    except ValidationError as e:
+        error_msg = f"Configuration validation failed: {e}"
+        logger.error(error_msg)
+        raise ConfigurationError(error_msg) from e
+    except Exception as e:
+        error_msg = f"Failed to load configuration: {str(e)}"
+        logger.error(error_msg)
+        raise ConfigurationError(error_msg) from e
 
 
-# Global configuration manager instance
-_config_manager: Optional[ConfigManager] = None
-
-
-def get_config_manager() -> ConfigManager:
-    """Get the global configuration manager instance."""
-    global _config_manager
-    if _config_manager is None:
-        _config_manager = ConfigManager()
-    return _config_manager
-
-
+# 向后兼容的辅助函数（将被弃用）
 def get_config() -> VoiceAgentConfig:
     """
-    Get the current configuration.
-    
-    This is the main function used throughout the application to access configuration.
+    [已弃用] 获取配置实例
+
+    警告：此函数仅用于向后兼容，未来版本将移除。
+    请使用 core.dependencies.get_config() 通过依赖注入获取配置。
+
+    Returns:
+        VoiceAgentConfig 实例
     """
-    return get_config_manager().get_config()
-
-
-def load_config() -> VoiceAgentConfig:
-    """Load configuration (same as get_config for compatibility)."""
-    return get_config()
-
-
-def reload_config() -> VoiceAgentConfig:
-    """Force reload configuration from environment variables."""
-    return get_config_manager().reload_config()
+    import warnings
+    warnings.warn(
+        "config.settings.get_config() is deprecated. "
+        "Use core.dependencies.get_config() with dependency injection instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    return load_config()
 

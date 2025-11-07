@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(find:*)",
+      "Bash(python -c:*)",
+      "Bash(set PYTHONPATH=D:ProjectsivanHappyWoodsbackEndsrc:*)",
+      "Bash(source:*)",
+      "Bash(export PYTHONPATH=/d/Projects/ivanHappyWoods/backEnd/src:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(curl:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill //F //PID 24000)",
+      "mcp__context7__resolve-library-id"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

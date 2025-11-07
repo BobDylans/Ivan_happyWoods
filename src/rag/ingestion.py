@@ -135,22 +135,30 @@ def _read_text_file(path: Path) -> Tuple[str, Dict[str, Any]]:
 
 def _extract_pdf_text(path: Path, max_pages: Optional[int]) -> Tuple[str, Dict[str, Any]]:
     _ensure_dependency("pypdf", PdfReader is not None)
-    reader = PdfReader(str(path))
+    try:
+        reader = PdfReader(str(path), strict=False)  # Use non-strict mode to handle malformed PDFs
+    except Exception as exc:
+        raise ValueError(f"Failed to open PDF file: {exc}") from exc
+    
     total_pages = len(reader.pages)
     limit = max_pages if max_pages is not None else total_pages
     limit = max(0, min(total_pages, limit))
 
     collected: List[str] = []
     for index in range(limit):
-        page = reader.pages[index]
-        text = page.extract_text() or ""
-        collected.append(text)
+        try:
+            page = reader.pages[index]
+            text = page.extract_text() or ""
+            collected.append(text)
+        except Exception as exc:
+            logger.warning("Failed to extract text from page %s of %s: %s", index + 1, path.name, exc)
+            continue  # Skip problematic pages but continue with others
 
     metadata = {
         "source_type": "pdf",
         "source_name": path.name,
         "page_range": f"1-{limit}" if limit else "0",
-        "page_count": limit,
+        "page_count": len(collected),
         "total_pages": total_pages,
     }
     return "\n\n".join(collected), metadata
@@ -246,27 +254,131 @@ async def _flush_batch(
     collection_name: Optional[str] = None,
     post_upsert: Optional[Callable[[List[DocumentChunk]], Awaitable[None]]] = None,
 ) -> None:
+    """
+    Embed a batch of chunks and upsert to Qdrant with comprehensive validation.
+    
+    This function performs multiple validation checks:
+    1. Validates batch is not empty
+    2. Validates embedding service returns correct number of vectors
+    3. Validates each vector has correct dimensions and valid values
+    4. Catches and logs detailed errors for debugging
+    """
+    if not batch:
+        logger.warning("Empty batch provided to _flush_batch, skipping")
+        return
+    
+    # Extract texts for embedding
     texts = [item.text for item in batch]
-    embeddings = await embedding_client.embed_texts(texts)
+    
+    # Validate all texts are non-empty
+    for idx, text in enumerate(texts):
+        if not text or not text.strip():
+            raise ValueError(
+                f"Chunk at index {idx} (ID: {batch[idx].id}) has empty text. "
+                f"Cannot generate embedding for empty content."
+            )
+    
+    logger.debug(f"Requesting embeddings for {len(texts)} text chunks")
+    
+    # Call embedding service
+    try:
+        embeddings = await embedding_client.embed_texts(texts)
+    except Exception as e:
+        logger.error(f"Embedding service failed: {e}")
+        raise ValueError(f"Failed to generate embeddings: {e}") from e
+    
+    # Validate embedding service response
+    if embeddings is None:
+        raise ValueError("Embedding service returned None instead of a list of vectors")
+    
+    if not isinstance(embeddings, list):
+        raise ValueError(
+            f"Embedding service returned invalid type: {type(embeddings).__name__}. "
+            f"Expected list of vectors."
+        )
+    
     if len(embeddings) != len(batch):
         raise ValueError(
-            "Embedding service returned an unexpected number of vectors: "
-            f"expected {len(batch)}, got {len(embeddings)}"
+            f"Embedding service returned unexpected number of vectors: "
+            f"expected {len(batch)}, got {len(embeddings)}. "
+            f"This indicates the embedding API may have failed silently."
         )
-
+    
+    # Validate and assign embeddings to chunks
     expected_dim = getattr(vector_store.config, "embed_dim", None)
-    for chunk, embedding in zip(batch, embeddings):
-        if not embedding:
-            raise ValueError("Received empty embedding vector from embedding service")
-        if expected_dim and len(embedding) != expected_dim:
+    logger.debug(f"Expected embedding dimension: {expected_dim}")
+    
+    for idx, (chunk, embedding) in enumerate(zip(batch, embeddings)):
+        # Check for None or empty embedding
+        if embedding is None:
             raise ValueError(
-                "Embedding dimensionality mismatch: "
-                f"expected {expected_dim}, got {len(embedding)}"
+                f"Chunk {chunk.id} (index {idx}) received None embedding from service. "
+                f"Text preview: {chunk.text[:100]}..."
             )
+        
+        if not embedding:
+            raise ValueError(
+                f"Chunk {chunk.id} (index {idx}) received empty embedding vector from service. "
+                f"Text length: {len(chunk.text)} chars"
+            )
+        
+        if not isinstance(embedding, list):
+            raise ValueError(
+                f"Chunk {chunk.id} (index {idx}) received invalid embedding type: {type(embedding).__name__}"
+            )
+        
+        # Check dimension
+        actual_dim = len(embedding)
+        if actual_dim == 0:
+            raise ValueError(
+                f"Chunk {chunk.id} (index {idx}) received zero-dimensional embedding. "
+                f"This indicates embedding generation failed."
+            )
+        
+        if expected_dim and actual_dim != expected_dim:
+            raise ValueError(
+                f"Chunk {chunk.id} (index {idx}) embedding dimension mismatch: "
+                f"expected {expected_dim}, got {actual_dim}. "
+                f"Model: {getattr(vector_store.config, 'embed_model', 'unknown')}"
+            )
+        
+        # Validate embedding values
+        try:
+            for i, val in enumerate(embedding):
+                if not isinstance(val, (int, float)):
+                    raise ValueError(f"Non-numeric value at position {i}: {type(val).__name__}")
+                # Check for NaN or Inf
+                if val != val:  # NaN check
+                    raise ValueError(f"NaN value at position {i}")
+                if abs(val) == float('inf'):
+                    raise ValueError(f"Infinite value at position {i}")
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"Chunk {chunk.id} (index {idx}) has invalid embedding values: {e}"
+            ) from e
+        
+        # Assign validated embedding
         chunk.embedding = embedding
-    await vector_store.upsert_chunks(batch, collection_name=collection_name)
+        logger.debug(f"Validated embedding for chunk {chunk.id}: dim={actual_dim}")
+    
+    logger.info(f"All {len(batch)} embeddings validated successfully")
+    
+    # Upsert to Qdrant (this will perform additional validation)
+    try:
+        await vector_store.upsert_chunks(batch, collection_name=collection_name)
+    except Exception as e:
+        logger.error(
+            f"Failed to upsert {len(batch)} chunks to Qdrant: {e}. "
+            f"First chunk ID: {batch[0].id if batch else 'N/A'}"
+        )
+        raise
+    
+    # Call post-upsert callback if provided
     if post_upsert:
-        await post_upsert(batch)
+        try:
+            await post_upsert(batch)
+        except Exception as e:
+            logger.warning(f"Post-upsert callback failed (non-fatal): {e}")
 
 
 async def ingest_files(
@@ -281,6 +393,7 @@ async def ingest_files(
     display_names: Optional[Dict[str, str]] = None,
     recreate: bool = False,
     batch_size: Optional[int] = None,
+    db_session: Optional[Any] = None,
 ) -> IngestionResult:
     """Ingest the provided files into Qdrant."""
 
@@ -325,14 +438,11 @@ async def ingest_files(
     corpus_record = None
     ingestion_error: Optional[Exception] = None
 
-    session = None
-    if owner_uuid and config.database.enabled:
+    session = db_session  # Use provided session if available
+    if owner_uuid and config.database.enabled and session:
         try:
-            from database.connection import get_async_session  # type: ignore
             from database.repositories.rag_repository import RAGRepository  # type: ignore
             from database.repositories.user_repository import UserRepository  # type: ignore
-
-            session = await exit_stack.enter_async_context(get_async_session())
 
             user_repo = UserRepository(session)
             existing_user = await user_repo.get_user_by_id(owner_uuid)
@@ -358,6 +468,8 @@ async def ingest_files(
                 logger.warning("RAG metadata persistence disabled: %s", exc)
             rag_repo = None
             corpus_record = None
+    elif owner_uuid and config.database.enabled and not session:
+        logger.info("RAG metadata persistence skipped: no database session provided")
 
     try:
         if ingestion_error:

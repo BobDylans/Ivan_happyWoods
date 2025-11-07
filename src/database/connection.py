@@ -21,9 +21,6 @@ from .models import Base
 
 logger = logging.getLogger(__name__)
 
-# 全局变量：数据库引擎
-_engine: Optional[AsyncEngine] = None
-_async_session_factory: Optional[async_sessionmaker] = None
 
 # 将数据库的url进行拼接，生成具体可用的url
 def get_database_url(config) -> str:
@@ -42,29 +39,28 @@ def get_database_url(config) -> str:
     )
 
 # 初始化数据库连接池
-async def init_db(config, echo: bool = False) -> Optional[AsyncEngine]:
+async def init_db(config, echo: bool = False) -> tuple[Optional[AsyncEngine], Optional[async_sessionmaker]]:
     """
     Initialize database connection pool with auto-fallback support.
-    
+
     Args:
         config: DatabaseConfig object
         echo: Whether to echo SQL statements
-        
+
     Returns:
-        AsyncEngine instance if successful, None if connection failed
+        Tuple of (AsyncEngine, async_sessionmaker) if successful,
+        (None, None) if connection failed
+
+    Note:
+        不再使用全局变量。引擎和会话工厂应该存储到 app.state。
+        使用 core.dependencies.get_db_engine() 和 get_db_session() 获取实例。
     """
-    global _engine, _async_session_factory
-    # 如果数据库引擎已经存在，则不用再创建
-    if _engine is not None:
-        logger.warning("Database already initialized, returning existing engine")
-        return _engine
-    
     try:
         # 调用方法获取到url
         database_url = get_database_url(config)
-        
+
         # Create async engine
-        _engine = create_async_engine(
+        engine = create_async_engine(
             # 将相关参数带入，创建数据库引擎
             database_url,
             echo=echo,
@@ -75,177 +71,167 @@ async def init_db(config, echo: bool = False) -> Optional[AsyncEngine]:
             pool_recycle=3600,   # Recycle connections after 1 hour
             connect_args={"timeout": 5}  # 5秒连接超时
         )
-        
+
         # 测试连接
-        async with _engine.connect() as conn:
+        async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
-        
+
         # Create session factory
-        _async_session_factory = async_sessionmaker(
-            _engine,
+        session_factory = async_sessionmaker(
+            engine,
             class_=AsyncSession,
             expire_on_commit=False,
             autocommit=False,
             autoflush=False,
         )
-        
+
         logger.info(f"✅ Database connection pool initialized: {config.host}:{config.port}/{config.database}")
-        return _engine
-        
+        return engine, session_factory
+
     except Exception as e:
         logger.warning(f"⚠️ Database connection failed: {e}")
         logger.info("📝 System will fallback to memory-only mode")
-        _engine = None
-        _async_session_factory = None
-        return None
+        return None, None
 
 # 根据项目中的类来创建对应的数据库表
-async def create_tables():
+async def create_tables(engine: AsyncEngine):
     """
     Create all tables defined in models.
-    
+
+    Args:
+        engine: AsyncEngine instance
+
     Note: In production, use Alembic migrations instead.
     """
-    global _engine
-    
-    if _engine is None:
-        raise RuntimeError("Database not initialized. Call init_db() first.")
-    
     # 🔧 确保 CheckpointModel 被导入，以便 Base.metadata.create_all 能创建表
     try:
         from .checkpointer import CheckpointModel  # noqa: F401
         logger.debug("CheckpointModel imported for table creation")
     except ImportError as e:
         logger.warning(f"Could not import CheckpointModel: {e}")
-    
-    async with _engine.begin() as conn:
+
+    async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
+
     logger.info("Database tables created successfully")
 
 
-async def drop_tables():
+async def drop_tables(engine: AsyncEngine):
     """
     Drop all tables defined in models.
-    
+
+    Args:
+        engine: AsyncEngine instance
+
     Warning: This will delete all data!
     """
-    global _engine
-    
-    if _engine is None:
-        raise RuntimeError("Database not initialized. Call init_db() first.")
-    
-    async with _engine.begin() as conn:
+    async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
-    
+
     logger.warning("Database tables dropped")
 
 
-async def close_db():
-    """Close database connection pool."""
-    global _engine, _async_session_factory
-    
-    if _engine is not None:
-        await _engine.dispose()
-        _engine = None
-        _async_session_factory = None
+async def close_db(engine: AsyncEngine):
+    """
+    Close database connection pool.
+
+    Args:
+        engine: AsyncEngine instance
+    """
+    if engine is not None:
+        await engine.dispose()
         logger.info("Database connection pool closed")
 
 
+# ============================================================================
+# 向后兼容的辅助函数（将被弃用）
+# ============================================================================
+
 def get_db_engine() -> AsyncEngine:
     """
-    Get the global database engine.
-    
-    Returns:
-        AsyncEngine instance
-        
-    Raises:
-        RuntimeError: If database not initialized
-    """
-    if _engine is None:
-        raise RuntimeError("Database not initialized. Call init_db() first.")
-    return _engine
+    [已弃用] 获取全局数据库引擎
 
-# 获取到数据库会话，用于执行实际sql
+    警告：此函数仅用于向后兼容，未来版本将移除。
+    请使用 core.dependencies.get_db_engine() 通过依赖注入获取引擎。
+
+    Raises:
+        RuntimeError: 始终抛出，因为不再使用全局变量
+    """
+    raise RuntimeError(
+        "get_db_engine() is deprecated and no longer uses global state. "
+        "Use core.dependencies.get_db_engine(request) with dependency injection instead."
+    )
+
+
 @asynccontextmanager
 async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     """
-    Get an async database session.
-    
-    Yields:
-        AsyncSession instance
-        
-    Example:
-        async with get_async_session() as session:
-            result = await session.execute(select(User))
-            users = result.scalars().all()
+    [已弃用] 获取异步数据库会话
+
+    警告：此函数仅用于向后兼容，未来版本将移除。
+    请使用 core.dependencies.get_db_session() 通过依赖注入获取会话。
+
+    Raises:
+        RuntimeError: 始终抛出，因为不再使用全局变量
     """
-    if _async_session_factory is None:
-        raise RuntimeError("Database not initialized. Call init_db() first.")
-    
-    async with _async_session_factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+    raise RuntimeError(
+        "get_async_session() is deprecated and no longer uses global state. "
+        "Use core.dependencies.get_db_session(request) with dependency injection instead."
+    )
+    yield  # This line will never be reached, but needed for type checking
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """
-    FastAPI dependency for getting database session.
-    
-    用于 FastAPI 的依赖注入。
-    
-    Example:
-        @app.get("/users")
-        async def get_users(session: AsyncSession = Depends(get_session)):
-            result = await session.execute(select(User))
-            return result.scalars().all()
-    """
-    if _async_session_factory is None:
-        raise RuntimeError("Database not initialized. Call init_db() first.")
-    
-    async with _async_session_factory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
+    [已弃用] FastAPI 依赖函数
 
-# 检查数据库是否健康
-async def check_db_health() -> bool:
+    警告：此函数仅用于向后兼容，未来版本将移除。
+    请使用 core.dependencies.get_db_session() 通过依赖注入获取会话。
+
+    Raises:
+        RuntimeError: 始终抛出，因为不再使用全局变量
+    """
+    raise RuntimeError(
+        "get_session() is deprecated and no longer uses global state. "
+        "Use core.dependencies.get_db_session(request) with dependency injection instead."
+    )
+    yield  # This line will never be reached, but needed for type checking
+
+
+async def check_db_health(engine: AsyncEngine) -> bool:
     """
     Check database connectivity.
-    
+
+    Args:
+        engine: AsyncEngine instance
+
     Returns:
         True if database is reachable, False otherwise
     """
     try:
-        async with get_async_session() as session:
-            await session.execute(text("SELECT 1"))
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
         return True
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
         return False
 
-# 获取当数据库的状态
-async def get_db_stats() -> dict:
+
+async def get_db_stats(engine: AsyncEngine) -> dict:
     """
     Get database statistics.
-    
+
+    Args:
+        engine: AsyncEngine instance
+
     Returns:
         Dictionary with connection pool stats
     """
-    if _engine is None:
+    if engine is None:
         return {"status": "not_initialized"}
-    
-    pool = _engine.pool
-    
+
+    pool = engine.pool
+
     return {
         "status": "initialized",
         "pool_size": pool.size(),  # type: ignore[attr-defined]
@@ -254,4 +240,5 @@ async def get_db_stats() -> dict:
         "overflow": pool.overflow(),  # type: ignore[attr-defined]
         "total_connections": pool.size() + pool.overflow(),  # type: ignore[attr-defined]
     }
+
 

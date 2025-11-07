@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
 from .auth_routes import get_current_user
-from database.connection import get_session
+from core.dependencies import get_db_session
 from database.repositories.session_repository import SessionRepository
 from database.repositories.message_repository import MessageRepository
 from database.repositories.conversation_repository import ConversationRepository
@@ -92,7 +92,7 @@ class DeleteSessionResponse(BaseModel):
 )
 async def get_user_sessions(
     current_user: Annotated[User, Depends(get_current_user)],
-    db_session: Annotated[AsyncSession, Depends(get_session)],
+    db_session: Annotated[AsyncSession, Depends(get_db_session)],
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(10, ge=1, le=100, description="每页大小"),
     status: Optional[str] = Query(None, description="会话状态过滤 (ACTIVE/TERMINATED)")
@@ -173,7 +173,7 @@ async def get_user_sessions(
 async def get_session_detail(
     session_id: str,
     current_user: Annotated[User, Depends(get_current_user)],
-    db_session: Annotated[AsyncSession, Depends(get_session)],
+    db_session: Annotated[AsyncSession, Depends(get_db_session)],
     limit: int = Query(50, ge=1, le=200, description="消息数量限制")
 ):
     """
@@ -251,7 +251,7 @@ async def get_session_detail(
 async def create_new_session(
     request: CreateSessionRequest,
     current_user: Annotated[User, Depends(get_current_user)],
-    db_session: Annotated[AsyncSession, Depends(get_session)]
+    db_session: Annotated[AsyncSession, Depends(get_db_session)]
 ):
     """
     创建新会话
@@ -309,7 +309,7 @@ async def create_new_session(
 async def delete_session(
     session_id: str,
     current_user: Annotated[User, Depends(get_current_user)],
-    db_session: Annotated[AsyncSession, Depends(get_session)]
+    db_session: Annotated[AsyncSession, Depends(get_db_session)]
 ):
     """
     删除会话
