@@ -1,10 +1,30 @@
 Generic single-database configuration with async support for Voice Agent database migrations.
 
-## Usage
+## Quick Start
+
+### First time setup (fresh database)
+```bash
+# Use the init script (recommended)
+python scripts/init_db.py
+
+# Or use Alembic directly
+alembic upgrade head
+```
+
+### Update existing database
+```bash
+alembic upgrade head
+```
+
+## Common Commands
 
 ### Create a new migration
 ```bash
+# Auto-generate from model changes (recommended)
 alembic revision --autogenerate -m "Description of changes"
+
+# Create empty migration (for data migrations)
+alembic revision -m "Description of changes"
 ```
 
 ### Apply migrations
@@ -15,11 +35,23 @@ alembic upgrade head
 # Upgrade to specific revision
 alembic upgrade <revision_id>
 
+# Upgrade one step
+alembic upgrade +1
+
+# Show SQL without executing
+alembic upgrade head --sql
+```
+
+### Rollback migrations
+```bash
 # Downgrade one revision
 alembic downgrade -1
 
 # Downgrade to specific revision
 alembic downgrade <revision_id>
+
+# Downgrade to base (initial state)
+alembic downgrade base
 ```
 
 ### View migration history
@@ -27,16 +59,55 @@ alembic downgrade <revision_id>
 # Current version
 alembic current
 
-# History
+# Full history
 alembic history
+
+# Detailed history
+alembic history --verbose
 
 # Show SQL for migration (don't execute)
 alembic upgrade head --sql
 ```
+
+## Existing Migrations
+
+### 001_add_auth_fields
+- Adds authentication fields to User model
+- Adds user_id, email, hashed_password, full_name, is_active
+- Creates unique constraints and indexes
+
+### 002_add_rag_tables
+- Creates RAG metadata tables
+- rag_corpora: User-specific document collections
+- rag_documents: Individual documents
+- rag_chunks: Text chunks with metadata
 
 ## Notes
 
 - Migrations are stored in `migrations/versions/`
 - The database URL is loaded from application config (config/base.yaml and .env)
 - Async SQLAlchemy is used for PostgreSQL operations
+- **IMPORTANT**: Always use Alembic for schema changes in production
+- For detailed guide, see: `docs/DATABASE_MIGRATION_GUIDE.md`
+
+## Troubleshooting
+
+### Alembic not found
+```bash
+pip install alembic
+```
+
+### Migration history mismatch
+```bash
+# Mark database as current
+alembic stamp head
+
+# Or reset to base
+alembic stamp base
+```
+
+### View detailed documentation
+```bash
+cat docs/DATABASE_MIGRATION_GUIDE.md
+```
 

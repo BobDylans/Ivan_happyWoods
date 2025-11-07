@@ -3,7 +3,7 @@
 Database Initialization Script
 
 This script initializes the PostgreSQL database for the Voice Agent system.
-It creates all tables, indexes, and optionally loads test data.
+It uses Alembic for schema migrations and optionally loads test data.
 
 Usage:
     python scripts/init_db.py [--drop] [--test-data]
@@ -11,18 +11,23 @@ Usage:
 Options:
     --drop: Drop existing tables before creating (WARNING: destroys all data)
     --test-data: Load sample test data after initialization
+    
+Note:
+    This script now uses Alembic migrations for database schema management.
+    Run `alembic upgrade head` to apply all migrations.
 """
 
 import asyncio
 import argparse
 import sys
+import subprocess
 from pathlib import Path
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-from database.connection import init_db, create_tables, drop_tables, close_db, check_db_health
+from database.connection import init_db, drop_tables, close_db, check_db_health
 from database.models import Base
 from config.settings import get_config
 
@@ -93,6 +98,19 @@ async def initialize_database(drop_existing: bool = False, load_test_data: bool 
             try:
                 await drop_tables()
                 print("✅ Existing tables dropped")
+                print()
+                print("Resetting Alembic migration history...")
+                try:
+                    # Reset alembic version table
+                    subprocess.run(
+                        ["alembic", "stamp", "base"],
+                        cwd=project_root,
+                        check=True,
+                        capture_output=True
+                    )
+                    print("✅ Alembic history reset")
+                except subprocess.CalledProcessError as e:
+                    print(f"⚠️  Warning: Could not reset Alembic history: {e}")
             except Exception as e:
                 print(f"❌ Failed to drop tables: {e}")
                 return False
@@ -100,20 +118,45 @@ async def initialize_database(drop_existing: bool = False, load_test_data: bool 
             print("❌ Aborted by user")
             return False
     
-    # Create tables
+    # Create tables using Alembic migrations
     print()
-    print("Creating database tables...")
+    print("Running Alembic migrations...")
     try:
-        await create_tables()
-        print("✅ Database tables created successfully")
+        result = subprocess.run(
+            ["alembic", "upgrade", "head"],
+            cwd=project_root,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        print("✅ Database schema created successfully via Alembic")
+        print()
+        print("Applied migrations:")
+        # Parse alembic output to show which migrations were applied
+        for line in result.stdout.split('\n'):
+            if 'Running upgrade' in line or 'INFO' in line:
+                print(f"  {line.strip()}")
         print()
         print("Created tables:")
-        print("  - users")
+        print("  - users (with authentication fields)")
         print("  - sessions")
         print("  - messages")
         print("  - tool_calls")
-    except Exception as e:
-        print(f"❌ Failed to create tables: {e}")
+        print("  - rag_corpora")
+        print("  - rag_documents")
+        print("  - rag_chunks")
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to run Alembic migrations: {e}")
+        print(f"   stdout: {e.stdout}")
+        print(f"   stderr: {e.stderr}")
+        print()
+        print("Troubleshooting:")
+        print("1. Make sure Alembic is installed: pip install alembic")
+        print("2. Check alembic.ini configuration")
+        print("3. Run manually: alembic upgrade head")
+        return False
+    except FileNotFoundError:
+        print("❌ Alembic not found. Please install: pip install alembic")
         return False
     
     # Load test data if requested
