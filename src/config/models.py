@@ -5,11 +5,13 @@ This module defines Pydantic models for all configuration sections,
 providing validation, type safety, and documentation for settings.
 """
 
+import os
+import re
 from enum import Enum
 from typing import Dict, List, Optional, Union
+
 from pydantic import BaseModel, Field, validator
 from pydantic_settings import BaseSettings
-import os
 
 
 class LogLevel(str, Enum):
@@ -177,6 +179,95 @@ class SpeechConfig(BaseModel):
     stt: STTConfig = Field(default_factory=STTConfig, description="STT settings")
 
 
+class RAGConfig(BaseModel):
+    """Retrieval-Augmented Generation configuration."""
+
+    enabled: bool = Field(default=False, description="Enable Qdrant-based RAG features")
+    qdrant_url: str = Field(default="http://localhost:6333", description="Qdrant HTTP endpoint")
+    qdrant_api_key: Optional[str] = Field(default=None, description="Qdrant API key (optional)")
+    collection: str = Field(default="voice_docs", description="Default Qdrant collection name")
+    per_user_collections: bool = Field(
+        default=False,
+        description="Create dedicated Qdrant collections for each user instead of sharing one",
+    )
+    collection_name_template: str = Field(
+        default="{collection}_{user_id}",
+        description=(
+            "Template for deriving collection names. Available placeholders: "
+            "{collection}, {user_id}, {corpus_id}."
+        ),
+    )
+    default_corpus_name: str = Field(
+        default="default",
+        description="Fallback corpus identifier when the client does not specify one",
+    )
+    embed_model: str = Field(default="text-embedding-3-small", description="Embedding model name")
+    embed_dim: int = Field(default=1536, ge=1, description="Embedding vector dimension")
+    chunk_size: int = Field(default=300, ge=50, le=2000, description="Document chunk size in characters")
+    chunk_overlap: int = Field(default=60, ge=0, le=500, description="Overlap between consecutive chunks")
+    top_k: int = Field(default=5, ge=1, le=20, description="Top-K results for retrieval")
+    min_score: float = Field(default=0.15, ge=0.0, le=1.0, description="Minimum similarity score filter")
+    doc_glob: str = Field(
+        default="docs/**/*.md;docs/**/*.pdf;docs/**/*.docx",
+        description="Glob pattern(s) for ingestion targets. Multiple patterns can be separated by ';', ',' or whitespace.",
+    )
+    doc_globs: List[str] = Field(
+        default_factory=list,
+        description="Explicit list of glob patterns for ingestion. Overrides doc_glob when provided.",
+    )
+    pdf_max_pages: Optional[int] = Field(
+        default=25,
+        ge=1,
+        description="Maximum number of pages to ingest from each PDF document (None = all pages).",
+    )
+    docx_max_paragraphs: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Maximum number of paragraphs to ingest from each DOCX document (None = all paragraphs).",
+    )
+    upload_temp_dir: str = Field(
+        default="docs/uploads",
+        description="Directory used to temporarily store uploaded documents before ingestion.",
+    )
+    max_upload_size_mb: int = Field(
+        default=20,
+        ge=1,
+        le=512,
+        description="Maximum upload size per file (MB) accepted by the RAG upload API.",
+    )
+    ingest_batch_size: int = Field(
+        default=16,
+        ge=1,
+        le=256,
+        description="Batch size for embedding requests during ingestion operations.",
+    )
+    request_timeout: int = Field(default=15, ge=1, description="Embedding request timeout in seconds")
+
+    @validator("doc_globs", pre=True, always=True)
+    def populate_doc_globs(cls, value, values):  # type: ignore[override]
+        if value:
+            if isinstance(value, str):
+                splits = [p.strip() for p in re.split(r"[;,\s]+", value) if p.strip()]
+                return splits
+            return value
+
+        doc_glob = values.get("doc_glob")
+        if isinstance(doc_glob, str):
+            return [p.strip() for p in re.split(r"[;,\s]+", doc_glob) if p.strip()]
+        return []
+
+    @validator("collection_name_template")
+    def validate_collection_template(cls, value):  # type: ignore[override]
+        required = {"collection", "user_id"}
+        missing = [placeholder for placeholder in required if placeholder not in value]
+        if missing:
+            raise ValueError(
+                "collection_name_template must contain placeholders for "
+                + ", ".join(missing)
+            )
+        return value
+
+
 class ToolConfig(BaseModel):
     """Individual tool configuration."""
     enabled: bool = Field(default=True, description="Whether tool is enabled")
@@ -254,6 +345,7 @@ class VoiceAgentConfig(BaseSettings):
     tools: ToolsConfig = Field(default_factory=ToolsConfig, description="MCP tools configuration")
     database: DatabaseConfig = Field(default_factory=DatabaseConfig, description="Database configuration")
     session: SessionConfig = Field(default_factory=SessionConfig, description="Session management config")
+    rag: RAGConfig = Field(default_factory=RAGConfig, description="Retrieval-Augmented Generation configuration")
     
     # System configurations
     logging: LoggingConfig = Field(default_factory=LoggingConfig, description="Logging configuration")
@@ -304,6 +396,26 @@ ENV_VAR_MAPPING = {
     "VOICE_AGENT_SESSION__TIMEOUT_MINUTES": "session.timeout_minutes",
     "VOICE_AGENT_SESSION__STORAGE_TYPE": "session.storage_type",
     "VOICE_AGENT_SESSION__REDIS_URL": "session.redis_url",
+
+    # RAG Configuration
+    "VOICE_AGENT_RAG__ENABLED": "rag.enabled",
+    "VOICE_AGENT_RAG__QDRANT_URL": "rag.qdrant_url",
+    "VOICE_AGENT_RAG__QDRANT_API_KEY": "rag.qdrant_api_key",
+    "VOICE_AGENT_RAG__COLLECTION": "rag.collection",
+    "VOICE_AGENT_RAG__EMBED_MODEL": "rag.embed_model",
+    "VOICE_AGENT_RAG__EMBED_DIM": "rag.embed_dim",
+    "VOICE_AGENT_RAG__CHUNK_SIZE": "rag.chunk_size",
+    "VOICE_AGENT_RAG__CHUNK_OVERLAP": "rag.chunk_overlap",
+    "VOICE_AGENT_RAG__TOP_K": "rag.top_k",
+    "VOICE_AGENT_RAG__MIN_SCORE": "rag.min_score",
+    "VOICE_AGENT_RAG__DOC_GLOB": "rag.doc_glob",
+    "VOICE_AGENT_RAG__DOC_GLOBS": "rag.doc_globs",
+    "VOICE_AGENT_RAG__PDF_MAX_PAGES": "rag.pdf_max_pages",
+    "VOICE_AGENT_RAG__DOCX_MAX_PARAGRAPHS": "rag.docx_max_paragraphs",
+    "VOICE_AGENT_RAG__UPLOAD_TEMP_DIR": "rag.upload_temp_dir",
+    "VOICE_AGENT_RAG__MAX_UPLOAD_SIZE_MB": "rag.max_upload_size_mb",
+    "VOICE_AGENT_RAG__INGEST_BATCH_SIZE": "rag.ingest_batch_size",
+    "VOICE_AGENT_RAG__REQUEST_TIMEOUT": "rag.request_timeout",
     
     # Logging Configuration
     "VOICE_AGENT_LOG_LEVEL": "logging.level",

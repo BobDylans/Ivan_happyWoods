@@ -23,6 +23,7 @@ from fastapi import (
     WebSocketDisconnect,
     UploadFile,
     File,
+    Form,
 )
 from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
@@ -1017,20 +1018,27 @@ async def execute_tool(tool_name: str, parameters: Dict[str, Any]):
             "error": str(e)
         }
 
-
-@rag_router.post("/upload", response_model=RAGUploadResponse)
-async def upload_documents(files: List[UploadFile] = File(...)) -> RAGUploadResponse:
-    if not files:
-        raise HTTPException(status_code=400, detail="No files provided")
-
-    if not CONFIG_AVAILABLE or get_config is None:
-        raise HTTPException(status_code=503, detail="Configuration system unavailable")
-
-    config = get_config()
+async def _handle_rag_upload(
+    files: List[UploadFile],
+    *,
+    config,
+    user_id: Optional[str],
+    corpus_name: Optional[str],
+    corpus_description: Optional[str],
+    corpus_id: Optional[str],
+    collection_name: Optional[str],
+    require_user_id: bool,
+) -> RAGUploadResponse:
     rag_cfg = config.rag
 
     if not rag_cfg.enabled:
         raise HTTPException(status_code=503, detail="RAG is disabled in configuration")
+
+    if require_user_id and not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required for this endpoint")
+
+    if rag_cfg.per_user_collections and not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required when per-user collections are enabled")
 
     temp_dir = Path(rag_cfg.upload_temp_dir).expanduser().resolve()
     try:
@@ -1103,9 +1111,18 @@ async def upload_documents(files: List[UploadFile] = File(...)) -> RAGUploadResp
         ingestion_result = await ingest_files(
             config,
             file_paths,
+            user_id=user_id,
+            corpus_name=corpus_name,
+            corpus_description=corpus_description,
+            corpus_id=corpus_id,
+            collection_name=collection_name,
+            display_names={str(path): saved_files[path] for path in file_paths},
             recreate=False,
             batch_size=rag_cfg.ingest_batch_size,
         )
+    except ValueError as exc:
+        logger.error("RAG ingestion failed: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         logger.error("RAG ingestion failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}")
@@ -1160,4 +1177,74 @@ async def upload_documents(files: List[UploadFile] = File(...)) -> RAGUploadResp
         stored_chunks=ingestion_result.stored_chunks,
         results=results,
         message=message,
+    )
+
+
+@rag_router.post("/upload", response_model=RAGUploadResponse)
+async def upload_documents(
+    files: List[UploadFile] = File(...),
+    user_id: Optional[str] = None,
+    corpus_name: Optional[str] = None,
+    corpus_description: Optional[str] = None,
+    corpus_id: Optional[str] = None,
+    collection_name: Optional[str] = None,
+) -> RAGUploadResponse:
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    if not CONFIG_AVAILABLE or get_config is None:
+        raise HTTPException(status_code=503, detail="Configuration system unavailable")
+
+    config = get_config()
+
+    return await _handle_rag_upload(
+        files,
+        config=config,
+        user_id=user_id,
+        corpus_name=corpus_name,
+        corpus_description=corpus_description,
+        corpus_id=corpus_id,
+        collection_name=collection_name,
+        require_user_id=False,
+    )
+
+
+@rag_router.post("/user/upload", response_model=RAGUploadResponse)
+async def upload_user_documents(
+    files: List[UploadFile] = File(...),
+    user_id: str = Form(..., description="User UUID owning the uploaded documents"),
+    corpus_name: Optional[str] = Form(
+        default=None,
+        description="Human readable corpus name (defaults to RAG config default)",
+    ),
+    corpus_description: Optional[str] = Form(
+        default=None,
+        description="Optional corpus description stored as metadata",
+    ),
+    corpus_id: Optional[str] = Form(
+        default=None,
+        description="Optional corpus identifier used in collection naming",
+    ),
+    collection_name: Optional[str] = Form(
+        default=None,
+        description="Override the resolved collection name",
+    ),
+) -> RAGUploadResponse:
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    if not CONFIG_AVAILABLE or get_config is None:
+        raise HTTPException(status_code=503, detail="Configuration system unavailable")
+
+    config = get_config()
+
+    return await _handle_rag_upload(
+        files,
+        config=config,
+        user_id=user_id,
+        corpus_name=corpus_name,
+        corpus_description=corpus_description,
+        corpus_id=corpus_id,
+        collection_name=collection_name,
+        require_user_id=True,
     )

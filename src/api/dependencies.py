@@ -73,10 +73,10 @@ def get_tts_service_cached(voice: str = "x5_lingxiaoxuan_flow"):
     global _tts_service_cache
     
     if _tts_service_cache is None:
-        from services.voice.tts_simple import IFlytekTTSService
+        from services.voice.tts import IFlytekTTSStreamingService
         config = get_config_cached()
         
-        _tts_service_cache = IFlytekTTSService(
+        _tts_service_cache = IFlytekTTSStreamingService(
             appid=config.speech.tts.appid,
             api_key=config.speech.tts.api_key,
             api_secret=config.speech.tts.api_secret,
@@ -103,7 +103,7 @@ def get_tts_streaming_cached(voice: str = "x5_lingxiaoxuan_flow"):
     global _tts_streaming_cache
     
     if _tts_streaming_cache is None:
-        from services.voice.tts_streaming import IFlytekTTSStreamingService
+        from services.voice.tts import IFlytekTTSStreamingService
         config = get_config_cached()
         
         _tts_streaming_cache = IFlytekTTSStreamingService(
@@ -137,7 +137,7 @@ def get_stt_service_cached():
     global _stt_service_cache
     
     if _stt_service_cache is None:
-        from services.voice.stt_simple import IFlytekSTTService, STTConfig
+        from services.voice.stt import IFlyTekSTTService, STTConfig
         config = get_config_cached()
         
         stt_config = STTConfig(
@@ -150,7 +150,7 @@ def get_stt_service_cached():
             accent="mandarin"
         )
         
-        _stt_service_cache = IFlytekSTTService(stt_config)
+        _stt_service_cache = IFlyTekSTTService(stt_config)
         logger.debug("STT service initialized (cached)")
     
     return _stt_service_cache

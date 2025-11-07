@@ -41,7 +41,7 @@ python start_server.py
 - 🎤 **语音对话**: 科大讯飞 STT/TTS，支持流式响应
 - 🤖 **智能代理**: LangGraph 工作流，多步骤推理
 - 🔧 **工具调用**: MCP 协议，7+ 内置工具（搜索、计算器、时间等）
-- 📚 **知识检索**: Qdrant + 外部 Embedding 支持的 RAG 能力
+- 📚 **知识检索**: Qdrant + 外部 Embedding 支持的 RAG 能力（可启用按用户隔离的向量集合，支持 `/api/v1/rag/user/upload` 直接导入 Markdown / PDF / DOCX / TXT 文档）
 - 📤 **文档上传**: 支持 Markdown / PDF / DOCX 热插入，自动入库并清理临时文件
 - 🧠 **对话管理**: 会话历史、上下文记忆（最多20条消息）
 - ⚡ **流式传输**: SSE + WebSocket 双模式

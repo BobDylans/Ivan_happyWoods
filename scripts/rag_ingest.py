@@ -51,10 +51,34 @@ async def ingest_documents(args: argparse.Namespace) -> None:
 
     logger.info("Discovered %s documents for ingestion", len(docs))
 
+    user_id = args.user_id
+    if config.rag.per_user_collections and not user_id:
+        logger.error(
+            "per_user_collections is enabled; please supply --user-id (UUID string)"
+        )
+        return
+
+    if user_id and args.validate_uuid:
+        from uuid import UUID
+
+        try:
+            UUID(user_id)
+        except ValueError as exc:
+            logger.error("--user-id must be a valid UUID: %s", exc)
+            return
+
+    display_names = {str(path): path.name for path in docs}
+
     try:
         result = await ingest_files(
             config,
             docs,
+            user_id=user_id,
+            corpus_name=args.corpus_name,
+            corpus_description=args.corpus_description,
+            corpus_id=args.corpus_id,
+            collection_name=args.collection_name,
+            display_names=display_names,
             recreate=args.recreate,
             batch_size=args.batch_size,
         )
@@ -90,6 +114,43 @@ def parse_args() -> argparse.Namespace:
         help="Embedding batch size override (defaults to VOICE_AGENT_RAG__INGEST_BATCH_SIZE)",
     )
     parser.add_argument("--recreate", action="store_true", help="Recreate the collection before ingesting")
+    parser.add_argument(
+        "--user-id",
+        type=str,
+        default=None,
+        help="User UUID owning the corpus (required when per_user_collections is enabled)",
+    )
+    parser.add_argument(
+        "--corpus-name",
+        type=str,
+        default=None,
+        help="Logical corpus name for this ingestion run (defaults to config.default_corpus_name)",
+    )
+    parser.add_argument(
+        "--corpus-description",
+        type=str,
+        default=None,
+        help="Optional human readable description stored alongside corpus metadata",
+    )
+    parser.add_argument(
+        "--corpus-id",
+        type=str,
+        default=None,
+        help="Optional custom corpus identifier used when building collection names",
+    )
+    parser.add_argument(
+        "--collection-name",
+        type=str,
+        default=None,
+        help="Force ingestion into a specific Qdrant collection (overrides template)",
+    )
+    parser.add_argument(
+        "--no-uuid-validation",
+        dest="validate_uuid",
+        action="store_false",
+        help="Skip UUID format validation for --user-id",
+    )
+    parser.set_defaults(validate_uuid=True)
     return parser.parse_args()
 
 

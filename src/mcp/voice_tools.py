@@ -11,9 +11,8 @@ from typing import Any, Dict, List, Optional
 from pathlib import Path
 
 from .base import Tool, ToolParameter, ToolParameterType, ToolResult, ToolExecutionError
-from services.voice.tts_simple import IFlytekTTSService
-from services.voice.tts_streaming import IFlytekTTSStreamingService
-from services.voice.stt_simple import IFlytekSTTService, STTConfig
+from services.voice.tts import IFlytekTTSStreamingService
+from services.voice.stt import IFlyTekSTTService, STTConfig
 from services.voice.audio_converter import get_audio_converter, AudioConversionError
 from config.settings import get_config
 
@@ -153,7 +152,7 @@ class VoiceSynthesisTool(Tool):
             else:
                 if self._tts_service is None:
                     config = get_config()
-                    self._tts_service = IFlytekTTSService(
+                    self._tts_service = IFlytekTTSStreamingService(
                         appid=config.speech.tts.appid,
                         api_key=config.speech.tts.api_key,
                         api_secret=config.speech.tts.api_secret,
@@ -327,7 +326,7 @@ class SpeechRecognitionTool(Tool):
                     language=language,
                     accent="mandarin"
                 )
-                self._stt_service = IFlytekSTTService(stt_config)
+                self._stt_service = IFlyTekSTTService(stt_config)
             
             # 执行识别
             result = await self._stt_service.recognize(pcm_data)

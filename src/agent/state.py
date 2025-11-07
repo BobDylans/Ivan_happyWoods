@@ -92,6 +92,11 @@ class AgentState(TypedDict):
     # External history from session manager (optional)
     external_history: Optional[List[Dict[str, str]]]
 
+    # Retrieval-Augmented Generation context
+    rag_snippets: List[Dict[str, Any]]
+    active_corpus_id: Optional[str]
+    rag_collection: Optional[str]
+
 
 class ConversationContext(BaseModel):
     """Extended context for conversation management."""
@@ -177,7 +182,9 @@ def create_initial_state(
     session_id: str,
     user_input: str,
     user_id: Optional[str] = None,
-    model_config: Optional[Dict[str, Any]] = None
+    model_config: Optional[Dict[str, Any]] = None,
+    corpus_id: Optional[str] = None,
+    rag_collection: Optional[str] = None,
 ) -> AgentState:
     """Create an initial agent state for a new conversation turn."""
     now = datetime.now()
@@ -220,7 +227,12 @@ def create_initial_state(
         max_tokens=max_tokens_override if max_tokens_override is not None else 8192,  # 🔧 优先使用传入的值
         
         # External history from session manager (initialized as None)
-        external_history=None
+        external_history=None,
+
+        # RAG context
+        rag_snippets=[],
+        active_corpus_id=corpus_id,
+        rag_collection=rag_collection,
     )
 
 
@@ -244,5 +256,7 @@ def state_to_dict(state: AgentState) -> Dict[str, Any]:
         "error_state": state["error_state"],
         "model_config": state["model_config"],
         "temperature": state["temperature"],
-        "max_tokens": state["max_tokens"]
+        "max_tokens": state["max_tokens"],
+        "external_history": state.get("external_history"),
+        "rag_snippets": state.get("rag_snippets", []),
     }

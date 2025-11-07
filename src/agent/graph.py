@@ -269,7 +269,9 @@ class VoiceAgent:
         session_id: str,
         user_id: Optional[str] = None,
         model_config: Optional[Dict[str, Any]] = None,
-        external_history: Optional[List[Dict]] = None
+        external_history: Optional[List[Dict]] = None,
+        corpus_id: Optional[str] = None,
+        rag_collection: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         处理用户消息并返回代理的响应。
@@ -292,7 +294,9 @@ class VoiceAgent:
                 session_id=session_id,
                 user_input=user_input,
                 user_id=user_id,
-                model_config=model_config or {}
+                model_config=model_config or {},
+                corpus_id=corpus_id,
+                rag_collection=rag_collection,
             )
             
             # 如果有外部历史，添加到 state（即使是空列表也要添加）
@@ -312,18 +316,23 @@ class VoiceAgent:
             )
             
             # 格式化返回结果
+            rag_snippets = final_state.get("rag_snippets") or []
+            metadata = {
+                "intent": final_state.get("current_intent"),
+                "tool_calls": len(final_state.get("tool_calls", [])),
+                "model": final_state["model_config"].get("model", "unknown"),
+                "error_state": final_state.get("error_state"),
+                "rag_snippets": rag_snippets,
+            }
+
             response = {
                 "success": True,
                 "response": final_state["agent_response"],
                 "session_id": session_id,
                 "message_count": len(final_state["messages"]),
                 "timestamp": final_state["last_activity"].isoformat(),
-                "metadata": {
-                    "intent": final_state.get("current_intent"),
-                    "tool_calls": len(final_state.get("tool_calls", [])),
-                    "model": final_state["model_config"].get("model", "unknown"),
-                    "error_state": final_state.get("error_state")
-                }
+                "metadata": metadata,
+                "rag_snippets": rag_snippets,
             }
             
             self.logger.info(f"会话 {session_id} 的消息处理成功")
@@ -403,7 +412,9 @@ class VoiceAgent:
         session_id: str,
         user_id: Optional[str] = None,
         model_config: Optional[Dict[str, Any]] = None,
-        external_history: Optional[List[Dict]] = None  # 新增：外部历史参数
+        external_history: Optional[List[Dict]] = None,  # 新增：外部历史参数
+        corpus_id: Optional[str] = None,
+        rag_collection: Optional[str] = None,
     ):
         """流式处理用户消息,作为异步生成器产生事件。
 
@@ -417,7 +428,9 @@ class VoiceAgent:
             session_id=session_id,
             user_input=user_input,
             user_id=user_id,
-            model_config=model_config or {}
+            model_config=model_config or {},
+            corpus_id=corpus_id,
+            rag_collection=rag_collection,
         )
         
         # 添加外部历史到 state
@@ -465,9 +478,28 @@ class VoiceAgent:
             # ============================================================
             yield self.trace.node_started("call_llm", session_id)
             node_start_time = time.time()
-            
+
+            # 检索 RAG 结果并构造带知识上下文的消息
+            rag_results = await self.nodes._retrieve_rag_snippets(state)
+            if state.get("rag_snippets"):
+                yield {
+                    "type": "rag_snippets",
+                    "session_id": session_id,
+                    "snippets": state["rag_snippets"],
+                }
+
             external_history_for_llm = state.get("external_history")
             messages = self.nodes._prepare_llm_messages(state, external_history=external_history_for_llm)
+
+            if rag_results and self.nodes._rag_service:
+                rag_prompt = self.nodes._rag_service.build_prompt(rag_results)
+                if rag_prompt:
+                    system_message = {"role": "system", "content": rag_prompt}
+                    if messages and messages[-1].get("role") == "user":
+                        messages.insert(len(messages) - 1, system_message)
+                    else:
+                        messages.append(system_message)
+
             model = state["model_config"].get("model", self.config.llm.models.default)
             llm_config = prepare_llm_params(
                 model=model,
@@ -475,7 +507,7 @@ class VoiceAgent:
                 temperature=state.get("temperature", self.config.llm.temperature),
                 max_tokens=state.get("max_tokens", self.config.llm.max_tokens)
             )
-            
+
             # 流式调用 LLM（内部会发射 Node 层事件）
             async for event in self.nodes.stream_llm_call(messages, llm_config, session_id=session_id):
                 # 收集 delta 片段
@@ -578,7 +610,9 @@ class VoiceAgent:
             empty_state = create_initial_state(
                 session_id=session_id,
                 user_input="",
-                model_config={}
+                model_config={},
+                corpus_id=None,
+                rag_collection=None,
             )
             
             self.logger.info(f"会话 {session_id} 的对话已清除")

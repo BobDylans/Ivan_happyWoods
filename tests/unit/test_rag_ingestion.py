@@ -17,21 +17,25 @@ class DummyEmbeddingClient:
 
     async def embed_texts(self, texts):
         self.calls.append(list(texts))
-        return [[1.0] * 3 for _ in texts]
+        # Return vectors matching the default embed_dim (1536)
+        return [[1.0] * 1536 for _ in texts]
 
     async def aclose(self):  # pragma: no cover - no resources to close
         pass
 
 
 class DummyVectorStore:
-    def __init__(self, *args, **kwargs):
+    def __init__(self, config, *args, **kwargs):
+        self.config = config
         self.upserts = []
+        self.collections = []
 
     async def ensure_collection(self, *args, **kwargs):
+        self.collections.append(kwargs.get("collection_name"))
         return None
 
-    async def upsert_chunks(self, batch):
-        self.upserts.append(batch)
+    async def upsert_chunks(self, batch, *, collection_name=None):
+        self.upserts.append((collection_name, list(batch)))
 
     async def close(self):  # pragma: no cover - no resources to close
         pass
@@ -62,7 +66,7 @@ async def test_ingest_files_with_dummy_clients(monkeypatch, tmp_path):
     monkeypatch.setattr("src.rag.ingestion.EmbeddingClient", DummyEmbeddingClient)
     monkeypatch.setattr("src.rag.ingestion.QdrantVectorStore", DummyVectorStore)
 
-    result = await ingest_files(config, [source_file])
+    result = await ingest_files(config, [source_file], user_id=None)
 
     assert isinstance(result, IngestionResult)
     assert result.processed_files == 1

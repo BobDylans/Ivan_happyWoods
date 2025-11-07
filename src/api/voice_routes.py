@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
-from services.voice.stt import IFlytekSTTService, STTConfig, STTResult
+from services.voice.stt import IFlyTekSTTService, STTConfig, STTResult
 from services.voice.tts import IFlytekTTSStreamingService
 from services.voice.audio_converter import get_audio_converter, AudioConversionError
 from config.settings import get_config
@@ -57,11 +57,11 @@ class TTSResponse(BaseModel):
 
 
 # 服务实例（延迟初始化）
-_stt_service: Optional[IFlytekSTTService] = None
+_stt_service: Optional[IFlyTekSTTService] = None
 _tts_streaming_service: Optional[IFlytekTTSStreamingService] = None
 
 # 服务实例化
-def get_stt_service() -> IFlytekSTTService:
+def get_stt_service() -> IFlyTekSTTService:
     """获取STT服务实例（单例）"""
     global _stt_service
     
@@ -84,7 +84,7 @@ def get_stt_service() -> IFlytekSTTService:
             accent=config.speech.stt.accent or "mandarin"
         )
         
-        _stt_service = IFlytekSTTService(stt_config)
+        _stt_service = IFlyTekSTTService(stt_config)
         logger.info("STT服务已初始化")
     
     return _stt_service

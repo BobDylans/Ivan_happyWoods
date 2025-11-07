@@ -35,6 +35,7 @@ class User(Base):
     
     # Relationships
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
+    rag_corpora = relationship("RAGCorpus", back_populates="user", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<User(user_id={self.user_id}, username={self.username}, email={self.email})>"
@@ -131,4 +132,77 @@ class ToolCall(Base):
     
     def __repr__(self):
         return f"<ToolCall(call_id={self.call_id}, tool_name={self.tool_name}, execution_time={self.execution_time_ms}ms)>"
+
+
+class RAGCorpus(Base):
+    """Per-user RAG corpus metadata."""
+
+    __tablename__ = "rag_corpora"
+
+    corpus_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    collection_name = Column(String(255), nullable=False, index=True)
+    meta_data = Column(JSONB, default=dict, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    user = relationship("User", back_populates="rag_corpora")
+    documents = relationship("RAGDocument", back_populates="corpus", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_rag_corpora_user_collection", "user_id", "collection_name", unique=True),
+    )
+
+
+class RAGDocument(Base):
+    """Document metadata tracked for RAG ingestion."""
+
+    __tablename__ = "rag_documents"
+
+    document_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    corpus_id = Column(UUID(as_uuid=True), ForeignKey("rag_corpora.corpus_id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    source_path = Column(String(1024), nullable=True)
+    source_url = Column(String(1024), nullable=True)
+    display_name = Column(String(255), nullable=False)
+    checksum = Column(String(128), nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    mime_type = Column(String(255), nullable=True)
+    status = Column(String(32), nullable=False, default="ACTIVE")
+    ingestion_id = Column(UUID(as_uuid=True), nullable=True)
+    meta_data = Column(JSONB, default=dict, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    corpus = relationship("RAGCorpus", back_populates="documents")
+    chunks = relationship("RAGChunk", back_populates="document", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_rag_documents_user_corpus", "user_id", "corpus_id"),
+        Index("idx_rag_documents_display", "display_name"),
+    )
+
+
+class RAGChunk(Base):
+    """Chunk metadata referencing the vector store point id."""
+
+    __tablename__ = "rag_chunks"
+
+    chunk_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("rag_documents.document_id", ondelete="CASCADE"), nullable=False, index=True)
+    corpus_id = Column(UUID(as_uuid=True), ForeignKey("rag_corpora.corpus_id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    point_id = Column(String(255), nullable=False, index=True)
+    chunk_index = Column(Integer, nullable=False)
+    text_preview = Column(Text, nullable=True)
+    meta_data = Column(JSONB, default=dict, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    document = relationship("RAGDocument", back_populates="chunks")
+
+    __table_args__ = (
+        Index("idx_rag_chunks_user_point", "user_id", "point_id"),
+    )
 

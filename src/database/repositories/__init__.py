@@ -8,11 +8,13 @@ from .session_repository import SessionRepository
 from .message_repository import MessageRepository
 from .tool_call_repository import ToolCallRepository
 from .conversation_repository import ConversationRepository
+from .rag_repository import RAGRepository
 
 __all__ = [
     "SessionRepository",
     "MessageRepository",
     "ToolCallRepository",
     "ConversationRepository",
+    "RAGRepository",
 ]
 

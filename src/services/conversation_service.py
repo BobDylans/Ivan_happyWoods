@@ -11,8 +11,8 @@ from typing import Optional, Dict, Any, AsyncGenerator
 from datetime import datetime
 from enum import Enum
 
-from services.voice.stt_simple import IFlytekSTTService, STTResult
-from services.voice.tts_streaming import IFlytekTTSStreamingService
+from services.voice.stt import IFlyTekSTTService, STTResult
+from services.voice.tts import IFlytekTTSStreamingService
 from services.voice.audio_converter import get_audio_converter, AudioConversionError
 from agent.graph import VoiceAgent
 
@@ -57,7 +57,7 @@ class ConversationService:
     def __init__(
         self,
         agent: VoiceAgent,
-        stt_service: IFlytekSTTService,
+        stt_service: IFlyTekSTTService,
         tts_service: IFlytekTTSStreamingService
     ):
         """
@@ -448,7 +448,7 @@ _conversation_service: Optional[ConversationService] = None
 
 def initialize_conversation_service(
     agent: VoiceAgent,
-    stt_service: IFlytekSTTService,
+    stt_service: IFlyTekSTTService,
     tts_service: IFlytekTTSStreamingService
 ) -> ConversationService:
     """

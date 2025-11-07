@@ -53,6 +53,11 @@ except ImportError:
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from config.models import VoiceAgentConfig
 
+try:
+    from rag.service import RAGService
+except ImportError:  # pragma: no cover - optional dependency
+    RAGService = None  # type: ignore
+
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +86,16 @@ class AgentNodes:
         
         # 接收 trace 实例
         self.trace = trace
+
+        # Initialize RAG service if enabled
+        self._rag_service: Optional[RAGService] = None
+        if RAGService and self.config.rag.enabled:
+            try:
+                self._rag_service = RAGService(config)
+                self.logger.info("📚 RAG service initialized")
+            except Exception as exc:  # pragma: no cover - safeguard
+                self.logger.warning(f"RAG service initialization failed: {exc}")
+                self._rag_service = None
     
     async def _ensure_http_client(self):
         """确保 HTTP 客户端已初始化（懒加载）
@@ -134,6 +149,57 @@ class AgentNodes:
         url = f"{base}/{endpoint}"
         self.logger.info(f"🔧 最终 URL: {url}")
         return url
+
+    async def _retrieve_rag_snippets(self, state: AgentState):
+        if not self._rag_service or not self._rag_service.enabled:
+            state["rag_snippets"] = []
+            return []
+
+        query = state.get("user_input", "")
+        if not query.strip():
+            state["rag_snippets"] = []
+            return []
+
+        user_id = state.get("user_id")
+        corpus_id = state.get("active_corpus_id")
+        if corpus_id is None:
+            corpus_id = self.config.rag.default_corpus_name
+            state["active_corpus_id"] = corpus_id
+
+        try:
+            resolved_collection = self._rag_service.resolve_collection_name(
+                user_id=user_id,
+                corpus_id=corpus_id,
+                collection_name=state.get("rag_collection"),
+            )
+            state["rag_collection"] = resolved_collection
+        except ValueError as exc:
+            self.logger.warning(f"RAG collection resolution failed: {exc}")
+            state["rag_snippets"] = []
+            return []
+
+        try:
+            results = await self._rag_service.retrieve(
+                query,
+                user_id=user_id,
+                corpus_id=corpus_id,
+                collection_name=resolved_collection,
+            )
+        except Exception as exc:  # pragma: no cover - tolerate runtime errors
+            self.logger.warning(f"RAG 检索失败: {exc}")
+            state["rag_snippets"] = []
+            return []
+
+        state["rag_snippets"] = [
+            {
+                "text": item.text,
+                "score": round(item.score, 4),
+                "source": item.source,
+                "metadata": item.metadata,
+            }
+            for item in results
+        ]
+        return results
     
     async def cleanup(self):
         """清理资源
@@ -149,6 +215,12 @@ class AgentNodes:
                 self.logger.warning(f"关闭 HTTP 客户端时出错: {e}")
             finally:
                 self._http_client = None
+
+        if self._rag_service:
+            try:
+                await self._rag_service.close()
+            except Exception as e:  # pragma: no cover - cleanup safeguard
+                self.logger.warning(f"关闭 RAG 服务时出错: {e}")
     
     async def __aenter__(self):
         """异步上下文管理器入口"""
@@ -243,7 +315,18 @@ class AgentNodes:
                 self.logger.info(f"🔍 Found external_history in state: {len(external_history)} messages")
             else:
                 self.logger.warning(f"⚠️ No external_history found in state for session {state['session_id']}")
+            rag_results = await self._retrieve_rag_snippets(state)
+
             messages = self._prepare_llm_messages(state, external_history=external_history)
+
+            if rag_results and self._rag_service:
+                rag_prompt = self._rag_service.build_prompt(rag_results)
+                if rag_prompt:
+                    system_message = {"role": "system", "content": rag_prompt}
+                    if messages and messages[-1].get("role") == "user":
+                        messages.insert(len(messages) - 1, system_message)
+                    else:
+                        messages.append(system_message)
             
             # 配置模型参数（使用兼容层处理不同模型的参数差异）
             model = state["model_config"].get("model", self.config.llm.models.default)
@@ -389,7 +472,8 @@ class AgentNodes:
                     "generated_at": datetime.now().isoformat(),
                     "model": state["model_config"].get("model", "unknown"),
                     "intent": state.get("current_intent"),
-                    "tool_calls_count": len(state["tool_calls"])
+                    "tool_calls_count": len(state["tool_calls"]),
+                    "rag_snippets": state.get("rag_snippets", []),
                 }
             )
             state["messages"].append(assistant_message)

@@ -56,7 +56,8 @@ Phase 2A (Voice Integration)     ███████████████�
 Phase 2B (Streaming TTS)         ████████████████████ 100% ✅
 Phase 2C (Conversation API)      ████████████████████ 100% ✅
 Phase 2D (Code Optimization)     ████████████████████ 100% ✅
-Phase 2E (MCP Tools)             ░░░░░░░░░░░░░░░░░░░░  0%  ⏳
+Phase 2E (RAG Integration)       ████████████████████ 100% ✅
+Phase 2F (MCP Tools)             ████████████████████ 100% ✅
 Phase 3 (Production Deployment)  ░░░░░░░░░░░░░░░░░░░░  0%  📋
 ```
 
@@ -106,23 +107,24 @@ Phase 3 (Production Deployment)  ░░░░░░░░░░░░░░░�
 │  │  • Workflow  │  │  • Sessions  │  │  • STT (科大) │         │
 │  │  • Nodes     │  │  • History   │  │  • TTS (科大) │         │
 │  │  • State     │  │  • Context   │  │  • Streaming │         │
+│  │  • RAG Query │  │              │  │              │         │
 │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘         │
 │         │                 │                 │                  │
 │         └─────────────────┴─────────────────┘                  │
 │                           │                                     │
 └───────────────────────────┼─────────────────────────────────────┘
                             │
-          ┌─────────────────┴─────────────────┐
-          │                                   │
-          ▼                                   ▼
-┌─────────────────────┐         ┌─────────────────────────┐
-│   External Services │         │   MCP Tools (Future)    │
-│                     │         │                         │
-│  • OpenAI API       │         │  • Search Tool          │
-│  • iFlytek STT/TTS  │         │  • Calculator           │
-│  • (Custom Proxy)   │         │  • Code Executor        │
-│                     │         │  • Image Generator      │
-└─────────────────────┘         └─────────────────────────┘
+          ┌─────────────────┴──────────────────────┐
+          │                 │                       │
+          ▼                 ▼                       ▼
+┌─────────────────┐  ┌──────────────┐  ┌─────────────────────┐
+│ External Services│  │  RAG Service │  │   MCP Tools         │
+│                  │  │              │  │                     │
+│ • OpenAI API     │  │ • Embedding  │  │ • Search (Tavily)   │
+│ • iFlytek TTS/STT│  │ • Qdrant     │  │ • Calculator        │
+│ • (Proxy)        │  │ • Ingestion  │  │ • DateTime          │
+│                  │  │ • Metadata   │  │ • Voice Tools       │
+└─────────────────┘  └──────────────┘  └─────────────────────┘
 ```
 
 ### 🔄 对话流程
@@ -142,7 +144,12 @@ Phase 3 (Production Deployment)  ░░░░░░░░░░░░░░░�
            │
            ▼
 ┌───────────────────────┐
-│  3. LLM Reasoning     │  调用 LLM API
+│  2.5 RAG Retrieval    │  检索相关知识片段 (可选)
+└──────────┬────────────┘  注入上下文
+           │
+           ▼
+┌───────────────────────┐
+│  3. LLM Reasoning     │  调用 LLM API (带 RAG 上下文)
 └──────────┬────────────┘  生成响应/工具调用
            │
            ▼
@@ -196,7 +203,9 @@ Phase 3 (Production Deployment)  ░░░░░░░░░░░░░░░�
 | **LLM API** | OpenAI-Compatible | 语言模型推理 | ✅ |
 | **STT** | 科大讯飞 (iFlytek) | 语音识别 | ✅ |
 | **TTS** | 科大讯飞 (iFlytek) | 语音合成 | ✅ |
-| **MCP Tools** | Custom | 工具集成 | ⏳ |
+| **Embedding** | OpenAI-Compatible | 文本向量化 | ✅ |
+| **Vector DB** | Qdrant (Docker) | 向量存储/检索 | ✅ |
+| **MCP Tools** | Custom | 工具集成 | ✅ |
 
 ### 开发工具
 
@@ -262,12 +271,29 @@ Ivan_HappyWoods/
 │   │       ├── stt_service.py     # STT 实现
 │   │       └── tts_service.py     # TTS 实现
 │   │
+│   ├── rag/                        # 📚 RAG 检索增强
+│   │   ├── service.py             # RAG 服务
+│   │   ├── embedding_client.py    # 嵌入客户端
+│   │   ├── qdrant_store.py        # 向量存储
+│   │   └── ingestion.py           # 文档导入
+│   │
+│   ├── database/                   # 🗄️ 数据库层
+│   │   ├── models.py              # ORM 模型
+│   │   ├── connection.py          # 连接管理
+│   │   ├── checkpointer.py        # 状态持久化
+│   │   └── repositories/          # 数据访问层
+│   │       ├── user_repository.py
+│   │       ├── rag_repository.py
+│   │       └── ...
+│   │
 │   ├── config/                     # ⚙️ 配置管理
 │   │   ├── models.py              # 配置模型
 │   │   └── settings.py            # 配置加载
 │   │
-│   ├── mcp/                        # 🔌 MCP 工具集成 (Future)
-│   │   └── (planned)
+│   ├── mcp/                        # 🔌 MCP 工具集成
+│   │   ├── tools.py               # 工具定义
+│   │   ├── voice_tools.py         # 语音专用工具
+│   │   └── registry.py            # 工具注册
 │   │
 │   └── utils/                      # 🛠️ 工具函数
 │       └── llm_compat.py          # LLM 兼容层
@@ -368,13 +394,51 @@ Ivan_HappyWoods/
   - 流式音频生成
   - 音频格式转换
 
-#### 4. Config 模块 (`src/config/`)
+#### 4. RAG 模块 (`src/rag/`)
+
+**职责**: 检索增强生成
+
+- **`service.py`**: RAG 服务
+  - 高级检索接口
+  - 集合管理
+  - 提示格式化
+
+- **`embedding_client.py`**: 嵌入客户端
+  - 文本向量化
+  - 批处理支持
+  - 超时处理
+
+- **`qdrant_store.py`**: 向量存储
+  - Qdrant 客户端封装
+  - 集合创建/管理
+  - 向量搜索
+
+- **`ingestion.py`**: 文档导入
+  - 文件加载 (MD/PDF/DOCX)
+  - 文本分块
+  - 批量向量化
+
+#### 5. Database 模块 (`src/database/`)
+
+**职责**: 数据持久化
+
+- **`models.py`**: ORM 模型
+  - `User`, `Session`, `Message`
+  - `RAGCorpus`, `RAGDocument`, `RAGChunk`
+
+- **`repositories/`**: 数据访问层
+  - `UserRepository`: 用户管理
+  - `RAGRepository`: RAG 元数据
+  - 统一的查询接口
+
+#### 6. Config 模块 (`src/config/`)
 
 **职责**: 配置管理
 
 - **`models.py`**: Pydantic 配置模型
   - `VoiceAgentConfig`: 主配置
   - `LLMConfig`: LLM 配置
+  - `RAGConfig`: RAG 配置
   - `SpeechConfig`: 语音配置
   - `APIConfig`: API 配置
 
@@ -383,7 +447,7 @@ Ivan_HappyWoods/
   - 配置验证
   - 配置合并
 
-#### 5. Utils 模块 (`src/utils/`)
+#### 7. Utils 模块 (`src/utils/`)
 
 **职责**: 工具函数
 
@@ -437,7 +501,32 @@ VOICE_AGENT_SPEECH__TTS__SPEED=50
 VOICE_AGENT_SPEECH__TTS__FORMAT=mp3
 ```
 
-#### 3. API 服务配置 (可选)
+#### 3. RAG 配置 (可选)
+
+```bash
+# 启用 RAG 检索增强
+VOICE_AGENT_RAG__ENABLED=true
+VOICE_AGENT_RAG__QDRANT_URL=http://localhost:6333
+VOICE_AGENT_RAG__COLLECTION=voice_docs
+
+# 嵌入模型
+VOICE_AGENT_RAG__EMBED_MODEL=text-embedding-3-small
+VOICE_AGENT_RAG__EMBED_DIM=1536
+VOICE_AGENT_RAG__REQUEST_TIMEOUT=60
+
+# 检索参数
+VOICE_AGENT_RAG__CHUNK_SIZE=300
+VOICE_AGENT_RAG__CHUNK_OVERLAP=60
+VOICE_AGENT_RAG__TOP_K=5
+VOICE_AGENT_RAG__MIN_SCORE=0.15
+
+# 按用户隔离 (可选)
+VOICE_AGENT_RAG__PER_USER_COLLECTIONS=false
+```
+
+> 详细配置请参阅 [docs/RAG_SETUP.md](RAG_SETUP.md)
+
+#### 4. API 服务配置 (可选)
 
 ```bash
 # 服务器配置
@@ -453,7 +542,7 @@ API_KEYS=dev-test-key-123
 VOICE_AGENT_SECURITY__CORS_ORIGINS=http://localhost:3000
 ```
 
-#### 4. 会话管理 (可选)
+#### 5. 会话管理 (可选)
 
 ```bash
 # 内存存储 (开发)
