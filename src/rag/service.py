@@ -87,6 +87,11 @@ class RAGService:
             self._config.embed_model,
             self._config.collection,
         )
+        logger.info(
+            "RAG Configuration: per_user_collections=%s, template='%s'",
+            self._config.per_user_collections,
+            self._config.collection_name_template,
+        )
 
         self._embedding_client = EmbeddingClient(
             base_url=config.llm.base_url,
