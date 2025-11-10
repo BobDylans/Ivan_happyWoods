@@ -48,7 +48,7 @@ tools:
   search_tool:
     enabled: true
     provider: "tavily"
-    api_key: "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"  # Tavily API Key
+    # api_key: Moved to .env as TAVILY_API_KEY for security
     timeout: 15
     max_retries: 2
     search_depth: "basic"  # basic or advanced
