@@ -16,6 +16,8 @@ from typing import Optional, AsyncGenerator
 from fastapi import Request, Depends
 from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine
 
+from .observability import Observability
+
 logger = logging.getLogger(__name__)
 
 
@@ -205,6 +207,25 @@ def get_tool_registry(request: Request):
     if not hasattr(request.app.state, 'tool_registry'):
         raise RuntimeError("Tool registry not initialized")
     return request.app.state.tool_registry
+
+
+# ============================================================================
+# Observability
+# ============================================================================
+
+def get_observability(request: Request) -> Observability:
+    """
+    获取 Observability 实例
+
+    Args:
+        request: FastAPI Request 对象
+
+    Returns:
+        Observability 实例
+    """
+    if not hasattr(request.app.state, 'observability'):
+        raise RuntimeError("Observability tracker not initialized")
+    return request.app.state.observability
 
 
 # ============================================================================
@@ -425,6 +446,12 @@ class AppState:
         """设置工具注册表"""
         app.state.tool_registry = registry
         logger.info("✅ Tool registry initialized in app.state")
+
+    @staticmethod
+    def set_observability(app, observer: Observability):
+        """设置 Observability 实例"""
+        app.state.observability = observer
+        logger.info("✅ Observability initialized in app.state")
 
     @staticmethod
     def set_stt_service(app, service):

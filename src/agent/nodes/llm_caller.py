@@ -15,6 +15,7 @@ and configuration. It delegates message formatting to message_builder module.
 
 import json
 import logging
+import time
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
@@ -178,7 +179,24 @@ class LLMCaller(AgentNodesBase):
             # ================================================================
             # Step 5: Call LLM API
             # ================================================================
+            llm_start = time.perf_counter()
             response = await self._make_llm_call(messages, llm_config)
+
+            if self.observability:
+                elapsed_ms = (time.perf_counter() - llm_start) * 1000
+                self.observability.observe(
+                    "llm.request_ms",
+                    elapsed_ms,
+                    model=model,
+                    mode="sync",
+                    status="success",
+                )
+                self.observability.increment(
+                    "llm.request_count",
+                    model=model,
+                    mode="sync",
+                    status="success",
+                )
 
             # ================================================================
             # Step 6: Determine response type and update state
@@ -204,6 +222,21 @@ class LLMCaller(AgentNodesBase):
             return state
 
         except Exception as e:
+            if self.observability:
+                elapsed_ms = (time.perf_counter() - llm_start) * 1000 if 'llm_start' in locals() else 0.0
+                self.observability.observe(
+                    "llm.request_ms",
+                    elapsed_ms,
+                    model=state.get("model_config", {}).get("model", self.config.llm.models.default),
+                    mode="sync",
+                    status="error",
+                )
+                self.observability.increment(
+                    "llm.request_count",
+                    model=state.get("model_config", {}).get("model", self.config.llm.models.default),
+                    mode="sync",
+                    status="error",
+                )
             # ================================================================
             # Error Handling
             # ================================================================

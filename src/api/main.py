@@ -9,6 +9,7 @@ import logging
 import time
 from datetime import datetime
 from contextlib import asynccontextmanager
+from typing import Callable, Optional
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +32,7 @@ from .middleware import (
 
 # 使用新的依赖注入系统
 from core.dependencies import AppState
+from core.observability import Observability
 
 # fastAPI中提到的中间件相当于java中的过滤器
 # Configure logging
@@ -48,12 +50,17 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Voice Agent API service...")
     # 重点是将MCP工具，agent等一系列功能一起初始化
     # 🚀 优化1: 集中配置管理 - 一次性加载配置到app.state
+    observability: Optional[Observability] = None
     try:
         import os
         from config.settings import load_config
         config = load_config()
         AppState.set_config(app, config)
         logger.info("✅ Configuration loaded and cached in app.state")
+
+        # 初始化 Observability 跟踪器
+        observability = Observability()
+        AppState.set_observability(app, observability)
 
         # 设置 API Keys 到环境变量（如果配置中有）
         if hasattr(config, 'security') and hasattr(config.security, 'api_keys'):
@@ -64,7 +71,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to load configuration: {e}")
         raise
-
+    tool_call_persister: Optional[Callable] = None
     # Initialize MCP tools
     try:
         from mcp.init_tools import initialize_default_tools
@@ -99,6 +106,36 @@ async def lifespan(app: FastAPI):
                     logger.info("✅ Database tables created/verified")
                 except Exception as e:
                     logger.warning(f"⚠️ Table creation warning: {e}")
+
+                async def persist_tool_call(
+                    session_id: str,
+                    tool_call,
+                    result,
+                    execution_ms: Optional[float] = None,
+                ) -> None:
+                    """Persist tool call using a fresh AsyncSession."""
+                    from database.repositories import ToolCallRepository  # Local import
+
+                    async with db_session_factory() as db_session:
+                        repo = ToolCallRepository(db_session)
+                        if result.success and result.result:
+                            payload = {"data": result.result, "success": True}
+                        else:
+                            payload = {"success": False, "error": result.error}
+
+                        if not isinstance(payload.get("data"), (dict, list, str, int, float, type(None))):
+                            payload["data"] = str(payload["data"])
+
+                        await repo.save_tool_call(
+                            session_id=session_id,
+                            tool_name=tool_call.name,
+                            parameters=tool_call.arguments,
+                            result=payload,
+                            execution_time_ms=int(execution_ms) if execution_ms is not None else None,
+                        )
+                        await db_session.commit()
+
+                tool_call_persister = persist_tool_call
             else:
                 logger.warning("⚠️ Database connection failed, will use memory-only mode")
         else:
@@ -111,7 +148,11 @@ async def lifespan(app: FastAPI):
     # Initialize voice agent
     try:
         from agent.graph import create_voice_agent
-        agent = create_voice_agent()  # 现在从 .env 自动加载
+        agent = create_voice_agent(
+            config=config,
+            observability=observability,
+            tool_call_persister=tool_call_persister,
+        )
         AppState.set_voice_agent(app, agent)
         logger.info("✅ Voice agent initialized successfully")
 
@@ -122,27 +163,22 @@ async def lifespan(app: FastAPI):
     # Initialize Session Manager (supports automatic fallback)
     try:
         from utils.session_manager import HybridSessionManager
-        from database.repositories import ConversationRepository
-        from sqlalchemy.ext.asyncio import AsyncSession
 
         # Check if database is available
         if hasattr(app.state, 'db_session_factory'):
             # Database available, use hybrid mode
-            async with app.state.db_session_factory() as db_session:
-                conversation_repo = ConversationRepository(db_session)
-
-                session_manager = HybridSessionManager(
-                    conversation_repo=conversation_repo,
-                    memory_limit=20,
-                    ttl_hours=24,
-                    enable_database=True
-                )
-                AppState.set_session_manager(app, session_manager)
-                logger.info("✅ SessionManager initialized (memory + database)")
+            session_manager = HybridSessionManager(
+                session_factory=app.state.db_session_factory,
+                memory_limit=20,
+                ttl_hours=24,
+                enable_database=True
+            )
+            AppState.set_session_manager(app, session_manager)
+            logger.info("✅ SessionManager initialized (memory + database)")
         else:
             # Database not available, use memory-only mode
             session_manager = HybridSessionManager(
-                conversation_repo=None,
+                session_factory=None,
                 memory_limit=20,
                 ttl_hours=24,
                 enable_database=False
@@ -265,6 +301,22 @@ async def add_process_time_header(request: Request, call_next):
     response = await call_next(request)
     process_time = time.time() - start_time
     response.headers["X-Process-Time"] = str(f"{process_time:.4f}")
+
+    observability = getattr(request.app.state, "observability", None)
+    if observability:
+        observability.observe(
+            "http.server.duration_ms",
+            process_time * 1000,
+            method=request.method,
+            path=str(request.url.path),
+            status=response.status_code,
+        )
+        observability.increment(
+            "http.server.request_count",
+            method=request.method,
+            path=str(request.url.path),
+            status=response.status_code,
+        )
     return response
 
 

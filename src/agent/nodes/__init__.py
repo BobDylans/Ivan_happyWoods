@@ -121,7 +121,14 @@ class AgentNodes:
         _response_formatter (ResponseFormatter): Response formatting delegate
     """
 
-    def __init__(self, config: VoiceAgentConfig, trace=None):
+    def __init__(
+        self,
+        config: VoiceAgentConfig,
+        trace=None,
+        *,
+        observability=None,
+        tool_call_persister=None,
+    ):
         """
         Initialize agent nodes with configuration.
 
@@ -148,11 +155,16 @@ class AgentNodes:
         # - RAG service (if enabled)
         # - Resource management (cleanup via __aenter__/__aexit__)
 
-        self._input_processor = InputProcessor(config, trace=trace)
-        self._llm_caller = LLMCaller(config, trace=trace)
-        self._llm_streamer = LLMStreamer(config, trace=trace)
-        self._tool_handler = ToolHandler(config, trace=trace)
-        self._response_formatter = ResponseFormatter(config, trace=trace)
+        self._input_processor = InputProcessor(config, trace=trace, observability=observability)
+        self._llm_caller = LLMCaller(config, trace=trace, observability=observability)
+        self._llm_streamer = LLMStreamer(config, trace=trace, observability=observability)
+        self._tool_handler = ToolHandler(
+            config,
+            trace=trace,
+            observability=observability,
+            tool_call_persister=tool_call_persister,
+        )
+        self._response_formatter = ResponseFormatter(config, trace=trace, observability=observability)
 
         self.logger.debug("AgentNodes initialized with modular architecture")
 
@@ -340,6 +352,10 @@ class AgentNodes:
             3  # Three tools were executed
         """
         return await self._tool_handler.handle_tools(state)
+
+    def configure_tool_persistence(self, persister) -> None:
+        """Configure tool call persistence after initialization."""
+        self._tool_handler.set_tool_call_persister(persister)
 
     async def format_response(self, state: AgentState) -> AgentState:
         """

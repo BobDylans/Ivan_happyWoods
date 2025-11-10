@@ -237,7 +237,7 @@ class ToolCallRepository:
 ### 阶段2: 混合SessionManager实现 (3小时)
 
 #### 2.1 创建 HybridSessionManager (2小时)
-**文件**: src/utils/hybrid_session_manager.py (新建)
+**文件**: src/utils/session_manager.py (更新)
 
 **设计思路**:
 ```python
@@ -336,34 +336,27 @@ class HybridSessionManager:
 **文件**: src/api/main.py
 
 ```python
-# 当前
-from utils.session_manager import SessionHistoryManager
-app.state.session_manager = SessionHistoryManager()
+from utils.session_manager import HybridSessionManager, SessionHistoryManager
 
-# 修改为
-from utils.hybrid_session_manager import HybridSessionManager
-from database.connection import get_async_session
-from database.repositories.conversation_repository import ConversationRepository
-
-@app.on_event("startup")
-async def startup_event():
-    # ... existing code ...
-    
-    # 初始化混合SessionManager
-    try:
-        async with get_async_session() as db_session:
-            repo = ConversationRepository(db_session)
-            app.state.session_manager = HybridSessionManager(
-                repo=repo,
-                max_history=20,
-                ttl_hours=24,
-                enable_db=app.state.config.database.enabled
-            )
-        logger.info("Hybrid session manager initialized with database support")
-    except Exception as e:
-        logger.warning(f"Database not available, using memory-only mode: {e}")
-        from utils.session_manager import SessionHistoryManager
-        app.state.session_manager = SessionHistoryManager()
+# 在 lifespan 启动流程中完成初始化
+if hasattr(app.state, "db_session_factory"):
+    session_manager = HybridSessionManager(
+        session_factory=app.state.db_session_factory,
+        memory_limit=20,
+        ttl_hours=24,
+        enable_database=True,
+    )
+    AppState.set_session_manager(app, session_manager)
+    logger.info("HybridSessionManager 初始化 (memory + database)")
+else:
+    session_manager = HybridSessionManager(
+        session_factory=None,
+        memory_limit=20,
+        ttl_hours=24,
+        enable_database=False,
+    )
+    AppState.set_session_manager(app, session_manager)
+    logger.info("HybridSessionManager 初始化 (memory-only mode)")
 ```
 
 #### 2.3 集成测试 (0.5小时)

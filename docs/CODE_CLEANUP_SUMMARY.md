@@ -9,7 +9,7 @@
 
 **问题**: 存在两个功能重叠的 Session Manager
 - `src/utils/session_manager.py` - 纯内存版本
-- `src/utils/hybrid_session_manager.py` - 混合版本（内存+数据库）
+- `src/utils/session_manager.py` - 混合版本（内存+数据库）
 
 **解决方案**:
 - 删除了 `hybrid_session_manager.py`
@@ -21,7 +21,7 @@
 
 **影响文件**:
 - `src/utils/session_manager.py` (重写)
-- `src/utils/hybrid_session_manager.py` (删除)
+- `src/utils/session_manager.py`（重命名并精简）
 - `src/utils/__init__.py` (更新导出)
 - `src/api/main.py` (更新导入)
 - `src/api/session_routes.py` (更新导入)
@@ -125,7 +125,7 @@ api_key = config.speech.stt.api_key
 ## 清理统计
 
 ### 删除的文件 (3个)
-1. `src/utils/hybrid_session_manager.py` - 435 行
+1. `src/utils/session_manager.py` - 435 行
 2. `src/services/voice/stt_simple.py` - 360 行
 3. `src/services/voice/tts_simple.py` - 243 行
 

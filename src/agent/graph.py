@@ -63,16 +63,28 @@ class VoiceAgent:
     输入处理、LLM 调用、工具处理和响应格式化。
     """
     # 初始化方法，依次调用下面定义好的方法
-    def __init__(self, config: VoiceAgentConfig):
+    def __init__(
+        self,
+        config: VoiceAgentConfig,
+        *,
+        observability=None,
+        tool_call_persister=None,
+    ):
         """使用配置初始化语音代理。"""
         self.config = config
         self.logger = logger  # Set logger before building graph
+        self.observability = observability
         
         # 创建追踪事件发射器
         self.trace = TraceEmitter()
         
         # 将 trace 传递给 nodes
-        self.nodes = AgentNodes(config, trace=self.trace)
+        self.nodes = AgentNodes(
+            config,
+            trace=self.trace,
+            observability=observability,
+            tool_call_persister=tool_call_persister,
+        )
         self.graph = self._build_graph()
         
         self.logger.info("语音代理初始化成功")
@@ -632,7 +644,13 @@ class VoiceAgent:
         }
 
 # 创建语音助手实例的工厂函数
-def create_voice_agent(config_path: Optional[str] = None) -> VoiceAgent:
+def create_voice_agent(
+    config: Optional[VoiceAgentConfig] = None,
+    config_path: Optional[str] = None,
+    *,
+    observability=None,
+    tool_call_persister=None,
+) -> VoiceAgent:
     """
     创建语音代理实例的工厂函数。
     
@@ -644,13 +662,18 @@ def create_voice_agent(config_path: Optional[str] = None) -> VoiceAgent:
     """
     try:
         # Load configuration
-        if config_path:
-            config = load_config(env_file=config_path)
-        else:
-            config = load_config()  # Use default config location
+        if config is None:
+            if config_path:
+                config = load_config(env_file=config_path)
+            else:
+                config = load_config()  # Use default config location
 
         # 创建并返回代理
-        agent = VoiceAgent(config)
+        agent = VoiceAgent(
+            config,
+            observability=observability,
+            tool_call_persister=tool_call_persister,
+        )
         logger.info(f"语音代理使用配置创建成功")
         return agent
 

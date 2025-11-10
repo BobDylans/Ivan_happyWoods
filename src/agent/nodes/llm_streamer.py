@@ -15,8 +15,9 @@ versioned SSE events that the frontend can consume for real-time updates.
 
 import json
 import logging
-from typing import AsyncGenerator, Dict, Any, List, Optional
+import time
 from datetime import datetime
+from typing import AsyncGenerator, Dict, Any, List, Optional
 
 from .base import AgentNodesBase
 from .message_builder import prepare_llm_messages
@@ -164,6 +165,9 @@ class LLMStreamer(AgentNodesBase):
             ...         print(f"\\nExecuting {len(event['tool_calls'])} tools...")
         """
         session_id = state.get("session_id", "unknown")
+        model = state.get("model_config", {}).get("model", self.config.llm.models.default)
+        stream_status = "success"
+        stream_start = time.perf_counter()
 
         try:
             self.logger.debug(f"为会话 {session_id} 开始流式调用 LLM")
@@ -221,6 +225,21 @@ class LLMStreamer(AgentNodesBase):
                 error=f"streaming_error: {str(e)}",
                 session_id=session_id
             )
+            stream_status = "error"
+        finally:
+            if self.observability:
+                elapsed_ms = (time.perf_counter() - stream_start) * 1000
+                self.observability.observe(
+                    "llm.stream_ms",
+                    elapsed_ms,
+                    model=model,
+                    status=stream_status,
+                )
+                self.observability.increment(
+                    "llm.stream_count",
+                    model=model,
+                    status=stream_status,
+                )
 
     # ========================================================================
     # Streaming Implementation
@@ -516,10 +535,15 @@ class LLMStreamer(AgentNodesBase):
             else:
                 # Fallback to non-streaming call
                 self.logger.warning("流式调用失败，回退到非流式调用")
+                stream_status = "fallback"
 
                 try:
                     from .llm_caller import LLMCaller
-                    caller = LLMCaller(self.config, trace=self.trace)
+                    caller = LLMCaller(
+                        self.config,
+                        trace=self.trace,
+                        observability=self.observability,
+                    )
 
                     # Prepare config for non-streaming call
                     llm_config = prepare_llm_params(
@@ -544,6 +568,7 @@ class LLMStreamer(AgentNodesBase):
                         error=f"fallback_failed: {str(fallback_error)}",
                         session_id=session_id
                     )
+                    stream_status = "error"
 
     async def _stream_llm_with_tool_results(
         self,

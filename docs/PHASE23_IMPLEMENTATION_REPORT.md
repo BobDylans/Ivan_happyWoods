@@ -46,7 +46,7 @@ meta_data = Column("metadata", JSONB, nullable=True)
 
 #### 1.2 Sessions 自动创建机制
 
-**实现位置**: `src/utils/hybrid_session_manager.py`
+**实现位置**: `src/utils/session_manager.py`
 
 **新增方法**:
 ```python
@@ -105,7 +105,7 @@ async def handle_tools(self, state):
 
 #### 1.4 Messages 持久化优化
 
-**实现位置**: `src/utils/hybrid_session_manager.py`
+**实现位置**: `src/utils/session_manager.py`
 
 **优化内容**:
 - ✅ 流式模式下完整保存用户和 AI 消息

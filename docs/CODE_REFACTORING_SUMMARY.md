@@ -53,7 +53,7 @@ async def init_db(config, echo: bool = False) -> Optional[AsyncEngine]:
 
 ---
 
-### 2. HybridSessionManager 优化 (`src/utils/hybrid_session_manager.py`)
+### 2. HybridSessionManager 优化 (`src/utils/session_manager.py`)
 
 **改进内容**:
 - 初始化时自动检测数据库是否可用
@@ -63,13 +63,14 @@ async def init_db(config, echo: bool = False) -> Optional[AsyncEngine]:
 ```python
 def __init__(
     self,
-    conversation_repo: Optional[ConversationRepository] = None,
+    session_factory: Optional[AsyncSessionFactory] = None,
     memory_limit: int = 20,
     ttl_hours: int = 24,
     enable_database: bool = True
 ):
     # 数据库持久化
-    self._enable_database = enable_database and conversation_repo is not None
+    self._session_factory = session_factory
+    self._enable_database = enable_database and session_factory is not None
     self._fallback_mode = not self._enable_database  # 自动降级
     
     if self._fallback_mode:
@@ -139,7 +140,7 @@ def _get_checkpointer(self):
 ```python
 # 初始化 Session Manager（支持自动降级）
 try:
-    from utils.hybrid_session_manager import HybridSessionManager
+    from utils.session_manager import HybridSessionManager
     from database.connection import init_db, create_tables
     from config.settings import ConfigManager
     
@@ -159,15 +160,15 @@ try:
     if db_engine:
         # 数据库可用，使用混合模式
         app.state.session_manager = HybridSessionManager(
-            conversation_repo=conversation_repo,
-            enable_database=True
+            session_factory=db_session_factory,
+            enable_database=True,
         )
         logger.info("✅ HybridSessionManager (memory + database)")
     else:
         # 数据库不可用，使用纯内存模式
         app.state.session_manager = HybridSessionManager(
-            conversation_repo=None,
-            enable_database=False
+            session_factory=None,
+            enable_database=False,
         )
         logger.info("✅ HybridSessionManager (memory-only mode)")
         

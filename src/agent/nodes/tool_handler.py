@@ -15,8 +15,9 @@ for dynamic tool discovery and execution.
 
 import json
 import logging
-from typing import Optional, List
+import time
 from datetime import datetime
+from typing import Any, Callable, Optional, List
 
 from .base import AgentNodesBase, DateTimeJSONEncoder
 from ..state import AgentState, ConversationMessage, MessageRole, ToolCall, ToolResult
@@ -80,6 +81,21 @@ class ToolHandler(AgentNodesBase):
         >>> result["next_action"]
         "call_llm"  # Returns to LLM for re-evaluation
     """
+
+    def __init__(
+        self,
+        config,
+        trace=None,
+        *,
+        observability=None,
+        tool_call_persister: Optional[Callable[..., Any]] = None,
+    ):
+        super().__init__(config, trace=trace, observability=observability)
+        self._tool_call_persister: Optional[Callable[..., Any]] = tool_call_persister
+
+    def set_tool_call_persister(self, persister: Optional[Callable[..., Any]]) -> None:
+        """Configure persistence callback post-initialization."""
+        self._tool_call_persister = persister
 
     async def handle_tools(self, state: AgentState) -> AgentState:
         """
@@ -163,7 +179,23 @@ class ToolHandler(AgentNodesBase):
             # ================================================================
             for tool_call in state["pending_tool_calls"]:
                 # Execute tool
+                start = time.perf_counter()
                 result = await self._execute_tool_call(tool_call)
+                execution_ms = (time.perf_counter() - start) * 1000
+
+                if self.observability:
+                    status = "success" if result.success else "error"
+                    self.observability.observe(
+                        "tool.execution_ms",
+                        execution_ms,
+                        tool=tool_call.name,
+                        status=status,
+                    )
+                    self.observability.increment(
+                        "tool.execution_count",
+                        tool=tool_call.name,
+                        status=status,
+                    )
 
                 # Collect results
                 state["tool_results"].append(result)
@@ -180,7 +212,8 @@ class ToolHandler(AgentNodesBase):
                 await self._save_tool_call_to_database(
                     session_id=state["session_id"],
                     tool_call=tool_call,
-                    result=result
+                    result=result,
+                    execution_ms=execution_ms
                 )
 
             # ================================================================
@@ -384,7 +417,8 @@ class ToolHandler(AgentNodesBase):
         self,
         session_id: str,
         tool_call: ToolCall,
-        result: ToolResult
+        result: ToolResult,
+        execution_ms: Optional[float] = None,
     ) -> None:
         """
         Save tool call record to database.
@@ -418,90 +452,29 @@ class ToolHandler(AgentNodesBase):
             >>> await handler._save_tool_call_to_database("sess_123", tool_call, result)
             # Logs: "💾 工具调用已保存到数据库: calculator (session: sess_123)"
         """
+        if not self._tool_call_persister:
+            return
+
         try:
-            # ================================================================
-            # Import Dependencies
-            # ================================================================
-            from database.repositories import ToolCallRepository
-            from sqlalchemy.ext.asyncio import AsyncSession
-
-            # ================================================================
-            # Get Database Engine
-            # ================================================================
-            # TODO: Improve this to use dependency injection
-            # Current approach accesses global app.state, which is not ideal
-            # Better: Pass db_engine/session_factory via constructor or method parameter
-            try:
-                from api.main import app
-
-                if not hasattr(app.state, 'db_engine'):
-                    self.logger.debug(
-                        "⚠️ app.state.db_engine 不存在，跳过保存工具调用 "
-                        "(数据库未初始化或已禁用)"
-                    )
-                    return
-
-                db_engine = app.state.db_engine
-
-                if db_engine is None:
-                    self.logger.debug(
-                        "⚠️ db_engine is None，跳过保存工具调用"
-                    )
-                    return
-
-            except Exception as import_error:
-                self.logger.debug(
-                    f"⚠️ 无法获取全局数据库引擎，跳过保存工具调用: {import_error}"
-                )
-                return
-
-            # ================================================================
-            # Prepare Tool Call Data
-            # ================================================================
-            execution_time_ms = None  # TODO: Track execution time if needed
-
-            if result.success and result.result:
-                try:
-                    result_data = {"data": result.result, "success": True}
-                except Exception:
-                    result_data = {"data": str(result.result), "success": True}
-            else:
-                result_data = {"success": False, "error": result.error}
-
-            # ================================================================
-            # Save to Database
-            # ================================================================
-            async with AsyncSession(db_engine) as db_session:
-                tool_call_repo = ToolCallRepository(db_session)
-
-                await tool_call_repo.save_tool_call(
-                    session_id=session_id,
-                    tool_name=tool_call.name,
-                    parameters=tool_call.arguments,
-                    result=result_data,
-                    execution_time_ms=execution_time_ms
-                )
-
-                # Commit transaction
-                await db_session.commit()
-
-                self.logger.info(
-                    f"💾 工具调用已保存到数据库: {tool_call.name} "
-                    f"(session: {session_id})"
-                )
-
+            await self._tool_call_persister(
+                session_id=session_id,
+                tool_call=tool_call,
+                result=result,
+                execution_ms=execution_ms,
+            )
+            self.logger.debug(
+                "💾 工具调用持久化完成: %s (session: %s)",
+                tool_call.name,
+                session_id,
+            )
         except Exception as e:
-            # ================================================================
-            # Error Handling (Non-Blocking)
-            # ================================================================
-            # Don't propagate exception - database save failure shouldn't
-            # interrupt conversation flow
+            # Don't propagate exception - database save failure shouldn't interrupt flow
             self.logger.error(
                 f"❌ 保存工具调用到数据库失败: {e}",
-                exc_info=True
+                exc_info=True,
             )
-            self.logger.error(f"   Session ID: {session_id}")
-            self.logger.error(f"   Tool Name: {tool_call.name}")
+            self.logger.error("   Session ID: %s", session_id)
+            self.logger.error("   Tool Name: %s", tool_call.name)
 
 
 # ============================================================================

@@ -15,16 +15,19 @@ Session Manager (Unified)
 
 import logging
 import asyncio
-from typing import List, Dict, Optional, Any
+from typing import Callable, Dict, List, Optional, Any
 from collections import deque, defaultdict
 from datetime import datetime, timedelta
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.repositories import ConversationRepository
-from database.connection import get_async_session
+from database.repositories import ConversationRepository, SessionRepository
 
 
 logger = logging.getLogger(__name__)
+
+
+AsyncSessionFactory = Callable[[], AsyncSession]
 
 
 class HybridSessionManager:
@@ -39,7 +42,7 @@ class HybridSessionManager:
     
     def __init__(
         self,
-        conversation_repo: Optional[ConversationRepository] = None,
+        session_factory: Optional[AsyncSessionFactory] = None,
         memory_limit: int = 20,
         ttl_hours: int = 24,
         enable_database: bool = True,
@@ -51,7 +54,7 @@ class HybridSessionManager:
         初始化混合会话管理器
         
         Args:
-            conversation_repo: 对话数据仓库（可选）
+            session_factory: AsyncSession 工厂，用于按需创建数据库会话
             memory_limit: 内存中每个会话保留的最大消息数
             ttl_hours: 会话过期时间（小时）
             enable_database: 是否启用数据库持久化
@@ -69,8 +72,8 @@ class HybridSessionManager:
         self._last_activity: Dict[str, datetime] = {}
         
         # 数据库持久化
-        self._conversation_repo = conversation_repo
-        self._enable_database = enable_database and conversation_repo is not None
+        self._session_factory = session_factory
+        self._enable_database = enable_database and session_factory is not None
         self._fallback_mode = not self._enable_database  # 如果数据库未启用，直接进入降级模式
         
         # 并发控制 - 为数据库操作添加锁
@@ -226,14 +229,18 @@ class HybridSessionManager:
         logger.info(f"🗑️ 内存会话已清除: {session_id}")
         
         # 2. 清除数据库（如果启用）
-        if self._enable_database and not self._fallback_mode and self._conversation_repo:
+        if self._enable_database and not self._fallback_mode and self._session_factory:
             try:
-                deleted = await self._conversation_repo.delete_session(session_id)
+                async with self._session_factory() as session:
+                    repo = ConversationRepository(session)
+                    deleted = await repo.delete_session(session_id)
+                    await session.commit()
+
                 if deleted:
                     logger.info(f"🗑️ 数据库会话已清除: {session_id}")
                 else:
                     logger.warning(f"⚠️ 数据库中未找到会话: {session_id}")
-            
+
             except Exception as e:
                 logger.error(f"数据库清除失败: {e}", exc_info=True)
                 self._handle_database_error()
@@ -304,17 +311,21 @@ class HybridSessionManager:
         limit: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """从数据库加载消息历史"""
-        if not self._conversation_repo:
+        if not self._session_factory:
             return []
         
         self._stats["db_reads"] += 1
-        
-        # 直接使用传入的 conversation_repo
-        messages = await self._conversation_repo.get_conversation_history_dict(
-            session_id=session_id,
-            limit=limit or self._memory_limit
-        )
-        
+        async with self._session_factory() as session:
+            repo = ConversationRepository(session)
+            try:
+                messages = await repo.get_conversation_history_dict(
+                    session_id=session_id,
+                    limit=limit or self._memory_limit,
+                )
+            finally:
+                # 确保事务被正确结束
+                await session.rollback()
+
         return messages
     
     async def _save_to_database(
@@ -325,32 +336,39 @@ class HybridSessionManager:
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
         """保存消息到数据库"""
-        if not self._conversation_repo:
+        if not self._session_factory:
             return
-        
-        # ✅ 1. 确保 session 存在（如果不存在则创建）
-        await self._ensure_session_exists(session_id)
-        
-        # 2. 保存消息
-        await self._conversation_repo.save_message(
-            session_id=session_id,
-            role=role,
-            content=content,
-            metadata=metadata
-        )
-        
-        # ✅ 3. 提交事务，确保数据持久化
-        await self._conversation_repo.session.commit()
+        async with self._session_factory() as session:
+            repo = ConversationRepository(session)
+            try:
+                # ✅ 1. 确保 session 存在（如果不存在则创建）
+                await self._ensure_session_exists(repo, session_id)
+
+                # 2. 保存消息
+                await repo.save_message(
+                    session_id=session_id,
+                    role=role,
+                    content=content,
+                    metadata=metadata,
+                )
+
+                # ✅ 3. 提交事务，确保数据持久化
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
     
-    async def _ensure_session_exists(self, session_id: str) -> None:
+    async def _ensure_session_exists(
+        self,
+        repo: ConversationRepository,
+        session_id: str,
+    ) -> None:
         """确保 session 记录存在，不存在则创建"""
-        if not self._conversation_repo:
+        if not self._session_factory:
             return
         
         try:
-            # 获取 session_repository
-            from database.repositories import SessionRepository
-            session_repo = SessionRepository(self._conversation_repo.session)
+            session_repo = SessionRepository(repo.session)
             
             # 检查 session 是否存在
             existing_session = await session_repo.get_session(session_id)
@@ -394,13 +412,15 @@ class HybridSessionManager:
         if not self._fallback_mode:
             return True
         
-        if not self._conversation_repo:
+        if not self._session_factory:
             return False
         
         try:
-            # 测试数据库连接 - 简单查询测试
-            await self._conversation_repo.get_conversation_history_dict("test", limit=1)
-            
+            async with self._session_factory() as session:
+                repo = ConversationRepository(session)
+                await repo.get_conversation_history_dict("healthcheck", limit=1)
+                await session.rollback()
+
             self._fallback_mode = False
             logger.info("✅ 数据库连接已恢复，退出降级模式")
             return True
@@ -423,46 +443,39 @@ _global_session_manager: Optional[HybridSessionManager] = None
 
 
 async def initialize_session_manager(
+    session_factory: Optional[AsyncSessionFactory] = None,
+    *,
     enable_database: bool = True,
     memory_limit: int = 20,
-    ttl_hours: int = 24
+    ttl_hours: int = 24,
 ) -> HybridSessionManager:
     """
-    初始化全局会话管理器
-    
+    初始化全局会话管理器。
+
     Args:
-        enable_database: 是否启用数据库
+        session_factory: AsyncSession 工厂函数
+        enable_database: 是否启用数据库持久化
         memory_limit: 内存缓存消息数
         ttl_hours: 会话过期时间
-    
+
     Returns:
         HybridSessionManager 实例
     """
     global _global_session_manager
-    
+
     if _global_session_manager is None:
-        # 创建数据库仓库实例（如果启用）
-        conversation_repo = None
-        if enable_database:
-            try:
-                # 注意：不在这里创建 session，由外部调用者管理
-                # 这里只是标记需要数据库支持
-                logger.info("✅ 数据库支持已启用（需要外部提供 session）")
-            except Exception as e:
-                logger.warning(f"数据库初始化失败，将使用纯内存模式: {e}")
-        
         _global_session_manager = HybridSessionManager(
-            conversation_repo=conversation_repo,
+            session_factory=session_factory,
             memory_limit=memory_limit,
             ttl_hours=ttl_hours,
-            enable_database=enable_database
+            enable_database=enable_database,
         )
-        
         logger.info("🚀 全局 SessionManager 已初始化")
-    
+
     return _global_session_manager
 
 
 def get_session_manager() -> Optional[HybridSessionManager]:
-    """获取全局会话管理器实例"""
+    """获取全局会话管理器实例。"""
     return _global_session_manager
+

@@ -14,6 +14,7 @@ inherit from this base class.
 import json
 import logging
 import asyncio
+import time
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
@@ -103,7 +104,7 @@ class AgentNodesBase:
         ...     await nodes.cleanup()
     """
 
-    def __init__(self, config: VoiceAgentConfig, trace=None):
+    def __init__(self, config: VoiceAgentConfig, trace=None, *, observability=None):
         """Initialize base node configuration.
 
         Args:
@@ -111,6 +112,7 @@ class AgentNodesBase:
                 - llm: LLM provider settings (API key, base URL, timeout)
                 - rag: RAG settings (enabled, collection name, etc.)
             trace: Optional TraceEmitter instance for visualization events
+            observability: Optional Observability tracker for metrics
         """
         self.config = config
         self.logger = logger
@@ -121,6 +123,7 @@ class AgentNodesBase:
 
         # Optional trace emitter for visualization
         self.trace = trace
+        self.observability = observability
 
         # Initialize RAG service if enabled
         self._rag_service: Optional[RAGService] = None
@@ -245,62 +248,81 @@ class AgentNodesBase:
                 }
             ]
         """
-        # Early return if RAG not enabled or initialized
-        if not self._rag_service or not self._rag_service.enabled:
-            state["rag_snippets"] = []
-            return []
-
-        # Get query from user input
-        query = state.get("user_input", "")
-        if not query.strip():
-            state["rag_snippets"] = []
-            return []
-
-        # Get user_id and corpus_id for collection resolution
-        user_id = state.get("user_id")
-        corpus_id = state.get("active_corpus_id")
-        if corpus_id is None:
-            corpus_id = self.config.rag.default_corpus_name
-            state["active_corpus_id"] = corpus_id
-
-        # Resolve collection name (handles per-user collections if enabled)
+        start_time = time.perf_counter()
+        metrics_status = "skipped"
+        resolved_collection: Optional[str] = None
         try:
-            resolved_collection = self._rag_service.resolve_collection_name(
-                user_id=user_id,
-                corpus_id=corpus_id,
-                collection_name=state.get("rag_collection"),
-            )
-            state["rag_collection"] = resolved_collection
-        except ValueError as exc:
-            self.logger.warning(f"RAG collection resolution failed: {exc}")
-            state["rag_snippets"] = []
-            return []
+            # Early return if RAG not enabled or initialized
+            if not self._rag_service or not self._rag_service.enabled:
+                state["rag_snippets"] = []
+                metrics_status = "disabled"
+                return []
 
-        # Perform RAG retrieval
-        try:
-            results = await self._rag_service.retrieve(
-                query,
-                user_id=user_id,
-                corpus_id=corpus_id,
-                collection_name=resolved_collection,
-            )
-        except Exception as exc:  # pragma: no cover - tolerate runtime errors
-            self.logger.warning(f"RAG 检索失败: {exc}")
-            state["rag_snippets"] = []
-            return []
+            # Get query from user input
+            query = state.get("user_input", "")
+            if not query.strip():
+                state["rag_snippets"] = []
+                metrics_status = "empty-query"
+                return []
 
-        # Format results for state storage
-        state["rag_snippets"] = [
-            {
-                "text": item.text,
-                "score": round(item.score, 4),
-                "source": item.source,
-                "metadata": item.metadata,
-            }
-            for item in results
-        ]
+            # Get user_id and corpus_id for collection resolution
+            user_id = state.get("user_id")
+            corpus_id = state.get("active_corpus_id")
+            if corpus_id is None:
+                corpus_id = self.config.rag.default_corpus_name
+                state["active_corpus_id"] = corpus_id
 
-        return results
+            # Resolve collection name (handles per-user collections if enabled)
+            try:
+                resolved_collection = self._rag_service.resolve_collection_name(
+                    user_id=user_id,
+                    corpus_id=corpus_id,
+                    collection_name=state.get("rag_collection"),
+                )
+                state["rag_collection"] = resolved_collection
+            except ValueError as exc:
+                self.logger.warning(f"RAG collection resolution failed: {exc}")
+                state["rag_snippets"] = []
+                metrics_status = "invalid-collection"
+                return []
+
+            # Perform RAG retrieval
+            try:
+                results = await self._rag_service.retrieve(
+                    query,
+                    user_id=user_id,
+                    corpus_id=corpus_id,
+                    collection_name=resolved_collection,
+                )
+            except Exception as exc:  # pragma: no cover - tolerate runtime errors
+                self.logger.warning(f"RAG 检索失败: {exc}")
+                state["rag_snippets"] = []
+                metrics_status = "error"
+                return []
+
+            # Format results for state storage
+            state["rag_snippets"] = [
+                {
+                    "text": item.text,
+                    "score": round(item.score, 4),
+                    "source": item.source,
+                    "metadata": item.metadata,
+                }
+                for item in results
+            ]
+
+            metrics_status = "success" if results else "no-results"
+            return results
+        finally:
+            if self.observability:
+                duration_ms = (time.perf_counter() - start_time) * 1000
+                payload = {
+                    "status": metrics_status,
+                }
+                if resolved_collection:
+                    payload["collection"] = resolved_collection
+                self.observability.observe("rag.retrieve_ms", duration_ms, **payload)
+                self.observability.increment("rag.query_count", status=metrics_status)
 
     # ========================================================================
     # Resource Cleanup
