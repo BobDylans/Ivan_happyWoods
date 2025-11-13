@@ -289,82 +289,102 @@ class VoiceAgent:
     ) -> Dict[str, Any]:
         """
         处理用户消息并返回代理的响应。
-        
+
         Args:
             user_input: 用户输入消息
             session_id: 唯一会话标识符
             user_id: 可选的用户标识符
             model_config: 可选的模型配置覆盖
             external_history: 可选的外部历史消息列表
-            
+
         Returns:
             包含代理响应和元数据的字典
         """
-        try:
-            self.logger.info(f"处理会话 {session_id} 的消息")
-            
-            # 根据入参创建一个初始状态
-            initial_state = create_initial_state(
-                session_id=session_id,
-                user_input=user_input,
-                user_id=user_id,
-                model_config=model_config or {},
-                corpus_id=corpus_id,
-                rag_collection=rag_collection,
-            )
-            
-            # 如果有外部历史，添加到 state（即使是空列表也要添加）
-            if external_history is not None:
-                initial_state["external_history"] = external_history
-                self.logger.info(f"🔄 Added {len(external_history)} messages to initial_state['external_history']")
-            else:
-                self.logger.warning(f"⚠️ No external_history provided to process_message (None)")
-            
-            # Configure thread for session persistence
-            thread_config = {"configurable": {"thread_id": session_id}}
-            
-            # 将初始的状态信息放入到graph中运行
-            final_state = await self.graph.ainvoke(
-                initial_state,
-                config=thread_config
-            )
-            
-            # 格式化返回结果
-            rag_snippets = final_state.get("rag_snippets") or []
-            metadata = {
-                "intent": final_state.get("current_intent"),
-                "tool_calls": len(final_state.get("tool_calls", [])),
-                "model": final_state["model_config"].get("model", "unknown"),
-                "error_state": final_state.get("error_state"),
-                "rag_snippets": rag_snippets,
-            }
+        # 🔍 添加分布式追踪
+        from core.tracing import get_tracer, SpanNames
+        tracer = get_tracer(__name__)
 
-            response = {
-                "success": True,
-                "response": final_state["agent_response"],
-                "session_id": session_id,
-                "message_count": len(final_state["messages"]),
-                "timestamp": final_state["last_activity"].isoformat(),
-                "metadata": metadata,
-                "rag_snippets": rag_snippets,
-            }
-            
-            self.logger.info(f"会话 {session_id} 的消息处理成功")
-            return response
-            
-        except Exception as e:
-            import traceback
-            error_trace = traceback.format_exc()
-            self.logger.error(f"处理消息时出错: {e}")
-            self.logger.error(f"完整错误堆栈:\n{error_trace}")
-            return {
-                "success": False,
-                "response": "抱歉,处理您的请求时遇到了错误。",
-                "session_id": session_id,
-                "error": str(e),
-                "timestamp": None,
-                "metadata": {"error": True}
-            }
+        with tracer.start_as_current_span(SpanNames.PROCESS_MESSAGE) as span:
+            span.set_attribute("session_id", session_id)
+            span.set_attribute("user_id", user_id or "anonymous")
+            span.set_attribute("input_length", len(user_input))
+
+            try:
+                self.logger.info(f"处理会话 {session_id} 的消息")
+
+                # 根据入参创建一个初始状态
+                initial_state = create_initial_state(
+                    session_id=session_id,
+                    user_input=user_input,
+                    user_id=user_id,
+                    model_config=model_config or {},
+                    corpus_id=corpus_id,
+                    rag_collection=rag_collection,
+                )
+
+                # 如果有外部历史，添加到 state（即使是空列表也要添加）
+                if external_history is not None:
+                    initial_state["external_history"] = external_history
+                    self.logger.info(f"🔄 Added {len(external_history)} messages to initial_state['external_history']")
+                else:
+                    self.logger.warning(f"⚠️ No external_history provided to process_message (None)")
+
+                # Configure thread for session persistence
+                thread_config = {"configurable": {"thread_id": session_id}}
+
+                # 将初始的状态信息放入到graph中运行
+                final_state = await self.graph.ainvoke(
+                    initial_state,
+                    config=thread_config
+                )
+
+                # 格式化返回结果
+                rag_snippets = final_state.get("rag_snippets") or []
+                metadata = {
+                    "intent": final_state.get("current_intent"),
+                    "tool_calls": len(final_state.get("tool_calls", [])),
+                    "model": final_state["model_config"].get("model", "unknown"),
+                    "error_state": final_state.get("error_state"),
+                    "rag_snippets": rag_snippets,
+                }
+
+                response = {
+                    "success": True,
+                    "response": final_state["agent_response"],
+                    "session_id": session_id,
+                    "message_count": len(final_state["messages"]),
+                    "timestamp": final_state["last_activity"].isoformat(),
+                    "metadata": metadata,
+                    "rag_snippets": rag_snippets,
+                }
+
+                # 标记为成功
+                span.set_attribute("status", "success")
+                span.set_attribute("tool_calls_count", len(final_state.get("tool_calls", [])))
+                span.set_attribute("response_length", len(final_state["agent_response"]))
+
+                self.logger.info(f"会话 {session_id} 的消息处理成功")
+                return response
+
+            except Exception as e:
+                import traceback
+                error_trace = traceback.format_exc()
+                self.logger.error(f"处理消息时出错: {e}")
+                self.logger.error(f"完整错误堆栈:\n{error_trace}")
+
+                # 记录错误到span
+                span.set_attribute("status", "error")
+                span.set_attribute("error.type", type(e).__name__)
+                span.set_attribute("error.message", str(e))
+
+                return {
+                    "success": False,
+                    "response": "抱歉,处理您的请求时遇到了错误。",
+                    "session_id": session_id,
+                    "error": str(e),
+                    "timestamp": None,
+                    "metadata": {"error": True}
+                }
     # 查询获取到历史信息
     async def get_conversation_history(
         self,

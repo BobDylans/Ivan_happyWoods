@@ -49,6 +49,15 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup
     logger.info("Starting Voice Agent API service...")
+
+    # 🔍 初始化分布式追踪 (Jaeger) - Phase P0
+    try:
+        from core.tracing import setup_tracing
+        setup_tracing()
+        logger.info("✅ Distributed tracing initialized")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to initialize tracing: {e}")
+
     # 重点是将MCP工具，agent等一系列功能一起初始化
     # 🚀 优化1: 集中配置管理 - 一次性加载配置到app.state
     observability: Optional[Observability] = None

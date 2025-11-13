@@ -56,6 +56,15 @@ pydub>=0.25.1                 # 音频格式转换 (需要 ffmpeg)
 # ============================================
 prometheus-client>=0.19.0,<1.0.0  # Prometheus 指标导出
 
+# 分布式追踪 (Distributed Tracing) - Phase P0
+jaeger-client>=4.8.0              # Jaeger 客户端
+opentelemetry-api>=1.20.0         # OpenTelemetry API
+opentelemetry-sdk>=1.20.0         # OpenTelemetry SDK
+opentelemetry-exporter-jaeger>=1.20.0  # Jaeger 导出器
+opentelemetry-instrumentation-fastapi>=0.41b0  # FastAPI 自动插桩
+opentelemetry-instrumentation-sqlalchemy>=0.41b0  # SQLAlchemy 自动插桩
+opentelemetry-instrumentation-requests>=0.41b0  # Requests 自动插桩
+
 # ============================================
 # 开发和测试 (Development & Testing)
 # ============================================
