@@ -128,6 +128,7 @@ class AgentNodes:
         *,
         observability=None,
         tool_call_persister=None,
+        tool_registry=None,
     ):
         """
         Initialize agent nodes with configuration.
@@ -135,6 +136,9 @@ class AgentNodes:
         Args:
             config: Voice agent configuration object
             trace: Optional TraceEmitter instance for visualization events
+            observability: Optional Observability tracker for metrics
+            tool_call_persister: Optional callable for persisting tool calls
+            tool_registry: Optional ToolRegistry instance for tool access
 
         Side Effects:
             - Creates instances of all specialized node modules
@@ -154,17 +158,19 @@ class AgentNodes:
         # - HTTP client (lazy-initialized, shared)
         # - RAG service (if enabled)
         # - Resource management (cleanup via __aenter__/__aexit__)
+        # - Tool registry (for tool list access)
 
-        self._input_processor = InputProcessor(config, trace=trace, observability=observability)
-        self._llm_caller = LLMCaller(config, trace=trace, observability=observability)
-        self._llm_streamer = LLMStreamer(config, trace=trace, observability=observability)
+        self._input_processor = InputProcessor(config, trace=trace, observability=observability, tool_registry=tool_registry)
+        self._llm_caller = LLMCaller(config, trace=trace, observability=observability, tool_registry=tool_registry)
+        self._llm_streamer = LLMStreamer(config, trace=trace, observability=observability, tool_registry=tool_registry)
         self._tool_handler = ToolHandler(
             config,
             trace=trace,
             observability=observability,
             tool_call_persister=tool_call_persister,
+            tool_registry=tool_registry,
         )
-        self._response_formatter = ResponseFormatter(config, trace=trace, observability=observability)
+        self._response_formatter = ResponseFormatter(config, trace=trace, observability=observability, tool_registry=tool_registry)
 
         self.logger.debug("AgentNodes initialized with modular architecture")
 

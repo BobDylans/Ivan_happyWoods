@@ -69,11 +69,14 @@ class VoiceAgent:
         *,
         observability=None,
         tool_call_persister=None,
+        db_engine=None,
+        tool_registry=None,
     ):
         """使用配置初始化语音代理。"""
         self.config = config
         self.logger = logger  # Set logger before building graph
         self.observability = observability
+        self.db_engine = db_engine  # 存储数据库引擎用于 checkpointer
         
         # 创建追踪事件发射器
         self.trace = TraceEmitter()
@@ -84,6 +87,7 @@ class VoiceAgent:
             trace=self.trace,
             observability=observability,
             tool_call_persister=tool_call_persister,
+            tool_registry=tool_registry,
         )
         self.graph = self._build_graph()
         
@@ -166,17 +170,15 @@ class VoiceAgent:
         # 尝试使用 PostgreSQL checkpointer
         try:
             from database.checkpointer import PostgreSQLCheckpointer
-            from database.connection import get_db_engine
             from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
             
-            # 尝试获取数据库引擎
-            engine = get_db_engine()
-            if engine is None:
-                raise RuntimeError("Database engine not initialized")
+            # 使用传入的数据库引擎
+            if self.db_engine is None:
+                raise RuntimeError("Database engine not provided to VoiceAgent")
             
             # 创建 session factory
             session_factory = async_sessionmaker(
-                engine,
+                self.db_engine,
                 class_=AsyncSession,
                 expire_on_commit=False
             )
@@ -650,12 +652,18 @@ def create_voice_agent(
     *,
     observability=None,
     tool_call_persister=None,
+    db_engine=None,
+    tool_registry=None,
 ) -> VoiceAgent:
     """
     创建语音代理实例的工厂函数。
     
     Args:
         config_path: 配置目录的可选路径（通常为 .env 文件所在目录）
+        observability: 可观测性实例
+        tool_call_persister: 工具调用持久化函数
+        db_engine: 数据库引擎（用于 PostgreSQL Checkpointer）
+        tool_registry: ToolRegistry 实例（用于工具访问）
         
     Returns:
         已配置的 VoiceAgent 实例
@@ -673,6 +681,8 @@ def create_voice_agent(
             config,
             observability=observability,
             tool_call_persister=tool_call_persister,
+            db_engine=db_engine,
+            tool_registry=tool_registry,
         )
         logger.info(f"语音代理使用配置创建成功")
         return agent

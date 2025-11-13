@@ -1,0 +1,250 @@
+{
+  "dashboard": {
+    "title": "Voice Agent - 系统概览",
+    "tags": ["voice-agent", "overview"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 1,
+    "refresh": "10s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "QPS (每秒请求数)",
+        "type": "graph",
+        "gridPos": {
+          "x": 0,
+          "y": 0,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(voice_agent_http_server_request_count_total[1m])",
+            "legendFormat": "总请求",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(voice_agent_http_server_request_count_total{status=~\"2..\"}[1m])",
+            "legendFormat": "成功请求",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(voice_agent_http_server_request_count_total{status=~\"5..\"}[1m])",
+            "legendFormat": "错误请求",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "reqps",
+            "label": "请求/秒"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "请求成功率",
+        "type": "singlestat",
+        "gridPos": {
+          "x": 12,
+          "y": 0,
+          "w": 6,
+          "h": 4
+        },
+        "targets": [
+          {
+            "expr": "sum(rate(voice_agent_http_server_request_count_total{status=~\"2..\"}[5m])) / sum(rate(voice_agent_http_server_request_count_total[5m])) * 100",
+            "refId": "A"
+          }
+        ],
+        "format": "percent",
+        "valueName": "current",
+        "thresholds": "90,95",
+        "colors": ["#d44a3a", "#e0b400", "#299c46"]
+      },
+      {
+        "id": 3,
+        "title": "活跃会话数",
+        "type": "singlestat",
+        "gridPos": {
+          "x": 18,
+          "y": 0,
+          "w": 6,
+          "h": 4
+        },
+        "targets": [
+          {
+            "expr": "count(count by (session_id) (voice_agent_http_server_request_count_total))",
+            "refId": "A"
+          }
+        ],
+        "format": "none",
+        "valueName": "current"
+      },
+      {
+        "id": 4,
+        "title": "平均响应时间",
+        "type": "graph",
+        "gridPos": {
+          "x": 0,
+          "y": 8,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "avg(voice_agent_http_server_duration_ms) by (path)",
+            "legendFormat": "{{path}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ms",
+            "label": "响应时间"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "P95 响应时间",
+        "type": "singlestat",
+        "gridPos": {
+          "x": 12,
+          "y": 4,
+          "w": 6,
+          "h": 4
+        },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(voice_agent_http_server_duration_ms_bucket[5m]))",
+            "refId": "A"
+          }
+        ],
+        "format": "ms",
+        "valueName": "current",
+        "thresholds": "500,1000",
+        "colors": ["#299c46", "#e0b400", "#d44a3a"]
+      },
+      {
+        "id": 6,
+        "title": "P99 响应时间",
+        "type": "singlestat",
+        "gridPos": {
+          "x": 18,
+          "y": 4,
+          "w": 6,
+          "h": 4
+        },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, rate(voice_agent_http_server_duration_ms_bucket[5m]))",
+            "refId": "A"
+          }
+        ],
+        "format": "ms",
+        "valueName": "current",
+        "thresholds": "1000,2000",
+        "colors": ["#299c46", "#e0b400", "#d44a3a"]
+      },
+      {
+        "id": 7,
+        "title": "请求量按端点分布",
+        "type": "piechart",
+        "gridPos": {
+          "x": 12,
+          "y": 8,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "sum by (path) (rate(voice_agent_http_server_request_count_total[5m]))",
+            "legendFormat": "{{path}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "错误率趋势",
+        "type": "graph",
+        "gridPos": {
+          "x": 0,
+          "y": 16,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(voice_agent_http_server_request_count_total{status=~\"4..\"}[1m])",
+            "legendFormat": "4xx 错误",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(voice_agent_http_server_request_count_total{status=~\"5..\"}[1m])",
+            "legendFormat": "5xx 错误",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "reqps",
+            "label": "错误/秒"
+          }
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {
+                "params": [0.05],
+                "type": "gt"
+              },
+              "operator": {
+                "type": "and"
+              },
+              "query": {
+                "params": ["B", "5m", "now"]
+              },
+              "reducer": {
+                "params": [],
+                "type": "avg"
+              },
+              "type": "query"
+            }
+          ],
+          "executionErrorState": "alerting",
+          "frequency": "60s",
+          "handler": 1,
+          "name": "高错误率告警",
+          "noDataState": "no_data",
+          "notifications": []
+        }
+      },
+      {
+        "id": 9,
+        "title": "请求方法分布",
+        "type": "bargauge",
+        "gridPos": {
+          "x": 12,
+          "y": 16,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "sum by (method) (rate(voice_agent_http_server_request_count_total[5m]))",
+            "legendFormat": "{{method}}",
+            "refId": "A"
+          }
+        ],
+        "orientation": "horizontal"
+      }
+    ]
+  }
+}
+

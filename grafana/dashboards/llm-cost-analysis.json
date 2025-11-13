@@ -1,0 +1,396 @@
+{
+  "dashboard": {
+    "title": "Voice Agent - LLM 成本分析",
+    "tags": ["voice-agent", "llm", "cost"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "LLM 调用频率",
+        "type": "graph",
+        "gridPos": {
+          "x": 0,
+          "y": 0,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(voice_agent_llm_call_count_total[5m]) by (provider, model)",
+            "legendFormat": "{{provider}} - {{model}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ops",
+            "label": "调用次数/秒"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "总 LLM 调用次数",
+        "type": "singlestat",
+        "gridPos": {
+          "x": 12,
+          "y": 0,
+          "w": 6,
+          "h": 4
+        },
+        "targets": [
+          {
+            "expr": "sum(voice_agent_llm_call_count_total)",
+            "refId": "A"
+          }
+        ],
+        "format": "none",
+        "valueName": "current"
+      },
+      {
+        "id": 3,
+        "title": "LLM 成功率",
+        "type": "singlestat",
+        "gridPos": {
+          "x": 18,
+          "y": 0,
+          "w": 6,
+          "h": 4
+        },
+        "targets": [
+          {
+            "expr": "sum(rate(voice_agent_llm_call_count_total{status=\"success\"}[5m])) / sum(rate(voice_agent_llm_call_count_total[5m])) * 100",
+            "refId": "A"
+          }
+        ],
+        "format": "percent",
+        "valueName": "current",
+        "thresholds": "95,99",
+        "colors": ["#d44a3a", "#e0b400", "#299c46"]
+      },
+      {
+        "id": 4,
+        "title": "LLM 平均响应时间",
+        "type": "graph",
+        "gridPos": {
+          "x": 0,
+          "y": 8,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "avg(voice_agent_llm_duration_ms) by (provider, model)",
+            "legendFormat": "{{provider}} - {{model}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ms",
+            "label": "响应时间"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "最慢的 LLM 调用 (P95)",
+        "type": "singlestat",
+        "gridPos": {
+          "x": 12,
+          "y": 4,
+          "w": 6,
+          "h": 4
+        },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(voice_agent_llm_duration_ms_bucket[5m]))",
+            "refId": "A"
+          }
+        ],
+        "format": "ms",
+        "valueName": "current",
+        "thresholds": "2000,5000",
+        "colors": ["#299c46", "#e0b400", "#d44a3a"]
+      },
+      {
+        "id": 6,
+        "title": "最慢的 LLM 调用 (P99)",
+        "type": "singlestat",
+        "gridPos": {
+          "x": 18,
+          "y": 4,
+          "w": 6,
+          "h": 4
+        },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, rate(voice_agent_llm_duration_ms_bucket[5m]))",
+            "refId": "A"
+          }
+        ],
+        "format": "ms",
+        "valueName": "current",
+        "thresholds": "5000,10000",
+        "colors": ["#299c46", "#e0b400", "#d44a3a"]
+      },
+      {
+        "id": 7,
+        "title": "Token 消耗趋势",
+        "type": "graph",
+        "gridPos": {
+          "x": 0,
+          "y": 16,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(voice_agent_llm_token_count_total{type=\"prompt\"}[5m])",
+            "legendFormat": "Prompt Tokens",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(voice_agent_llm_token_count_total{type=\"completion\"}[5m])",
+            "legendFormat": "Completion Tokens",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(voice_agent_llm_token_count_total[5m])",
+            "legendFormat": "Total Tokens",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ops",
+            "label": "Tokens/秒"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Token 消耗量 (24小时)",
+        "type": "singlestat",
+        "gridPos": {
+          "x": 12,
+          "y": 8,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "sum(increase(voice_agent_llm_token_count_total[24h]))",
+            "refId": "A"
+          }
+        ],
+        "format": "none",
+        "valueName": "current",
+        "sparkline": {
+          "show": true
+        }
+      },
+      {
+        "id": 9,
+        "title": "各模型 Token 消耗分布",
+        "type": "piechart",
+        "gridPos": {
+          "x": 0,
+          "y": 24,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "sum by (model) (rate(voice_agent_llm_token_count_total[1h]))",
+            "legendFormat": "{{model}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "模型调用分布",
+        "type": "piechart",
+        "gridPos": {
+          "x": 12,
+          "y": 16,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "sum by (model) (rate(voice_agent_llm_call_count_total[1h]))",
+            "legendFormat": "{{model}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 11,
+        "title": "估算成本 (基于 GPT 定价)",
+        "type": "table",
+        "gridPos": {
+          "x": 12,
+          "y": 24,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "sum by (model) (increase(voice_agent_llm_token_count_total{type=\"prompt\"}[1h])) / 1000000 * 0.5",
+            "format": "table",
+            "instant": true,
+            "legendFormat": "Prompt Cost",
+            "refId": "A"
+          },
+          {
+            "expr": "sum by (model) (increase(voice_agent_llm_token_count_total{type=\"completion\"}[1h])) / 1000000 * 1.5",
+            "format": "table",
+            "instant": true,
+            "legendFormat": "Completion Cost",
+            "refId": "B"
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "renameByName": {
+                "model": "模型",
+                "Value #A": "Prompt 成本 ($)",
+                "Value #B": "Completion 成本 ($)"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": 12,
+        "title": "LLM 提供商分布",
+        "type": "bargauge",
+        "gridPos": {
+          "x": 0,
+          "y": 32,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "sum by (provider) (rate(voice_agent_llm_call_count_total[1h]))",
+            "legendFormat": "{{provider}}",
+            "refId": "A"
+          }
+        ],
+        "orientation": "horizontal"
+      },
+      {
+        "id": 13,
+        "title": "Token 使用效率 (Token/请求)",
+        "type": "graph",
+        "gridPos": {
+          "x": 12,
+          "y": 32,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(voice_agent_llm_token_count_total[5m]) / rate(voice_agent_llm_call_count_total[5m])",
+            "legendFormat": "平均 Token/请求",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "none",
+            "label": "Tokens"
+          }
+        ]
+      },
+      {
+        "id": 14,
+        "title": "LLM 错误率",
+        "type": "graph",
+        "gridPos": {
+          "x": 0,
+          "y": 40,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(voice_agent_llm_call_count_total{status=\"error\"}[5m]) by (provider, model)",
+            "legendFormat": "{{provider}} - {{model}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ops",
+            "label": "错误次数/秒"
+          }
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": {
+                "params": [0.01],
+                "type": "gt"
+              },
+              "operator": {
+                "type": "and"
+              },
+              "query": {
+                "params": ["A", "5m", "now"]
+              },
+              "reducer": {
+                "params": [],
+                "type": "avg"
+              },
+              "type": "query"
+            }
+          ],
+          "executionErrorState": "alerting",
+          "frequency": "60s",
+          "handler": 1,
+          "name": "LLM 高错误率告警",
+          "noDataState": "no_data",
+          "notifications": []
+        }
+      },
+      {
+        "id": 15,
+        "title": "累计成本趋势 (估算)",
+        "type": "graph",
+        "gridPos": {
+          "x": 12,
+          "y": 40,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "sum(increase(voice_agent_llm_token_count_total[1h])) / 1000000 * 1.0",
+            "legendFormat": "每小时估算成本 ($)",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "currencyUSD",
+            "label": "成本"
+          }
+        ]
+      }
+    ]
+  }
+}
+

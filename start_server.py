@@ -68,9 +68,9 @@ async def check_dependencies():
 
     # Check configuration
     try:
-        from config.settings import get_config
+        from config.settings import load_config
 
-        config = get_config()
+        config = load_config()
         print(f"[OK] Configuration: OK (Environment: {config.environment})")
         print(f"     LLM: {config.llm.provider.value} - {config.llm.models.default}")
         print(f"     Voice: STT={config.speech.stt.provider.value}, TTS={config.speech.tts.provider.value}")

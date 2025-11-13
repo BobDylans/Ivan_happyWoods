@@ -564,29 +564,30 @@ User is asking about current time or date:
     return "\n\n".join(additions) if additions else ""
 
 
-def format_available_tools(tools: Optional[List[Any]] = None) -> str:
+def format_available_tools(tools: Optional[List[Any]] = None, tool_registry=None) -> str:
     """
     格式化可用工具列表为易读的文本
 
     Args:
-        tools: 工具列表（从 ToolRegistry 获取），如果为 None 则尝试从全局注册表获取
+        tools: 工具列表（从 ToolRegistry 获取）
+        tool_registry: ToolRegistry 实例（推荐使用）
 
     Returns:
         格式化的工具列表字符串
     """
     try:
-        if tools is None:
-            # 尝试从全局注册表获取
+        if tools is None and tool_registry is not None:
+            # 从提供的 registry 获取工具
             try:
-                from mcp import get_tool_registry
-                registry = get_tool_registry()
-                tools = registry.list_tools()
+                tools = tool_registry.list_tools()
             except Exception as e:
-                logger.warning(f"无法从全局注册表获取工具: {e}")
+                logger.warning(f"无法从注册表获取工具: {e}")
                 tools = []
 
         if not tools:
-            return "当前暂无可用工具。"
+            # 返回默认工具列表作为后备
+            logger.info("使用默认工具列表")
+            return "- **calculator**: 执行数学计算\n- **get_time**: 获取当前时间\n- **get_weather**: 查询天气信息\n- **web_search**: 搜索网络信息"
 
         tool_descriptions = []
         for tool in tools:
@@ -619,7 +620,8 @@ def build_tools_guide(available_tools: str) -> str:
 
 def build_optimized_system_prompt(
     available_tools: Optional[str] = None,
-    state: Optional[Dict[str, Any]] = None
+    state: Optional[Dict[str, Any]] = None,
+    tool_registry=None
 ) -> str:
     """
     构建优化的系统提示词
@@ -633,6 +635,7 @@ def build_optimized_system_prompt(
     Args:
         available_tools: 格式化的可用工具列表，如果为 None 会自动获取
         state: 当前对话状态，用于生成上下文感知提示词
+        tool_registry: ToolRegistry 实例（用于获取工具列表）
 
     Returns:
         完整的系统提示词字符串
@@ -642,7 +645,7 @@ def build_optimized_system_prompt(
 
     # 2. Tools guide (with available tools list)
     if available_tools is None:
-        available_tools = format_available_tools()
+        available_tools = format_available_tools(tool_registry=tool_registry)
     full_prompt += "\n\n" + build_tools_guide(available_tools)
 
     # 3. Task framework (always included)

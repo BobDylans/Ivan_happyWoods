@@ -39,7 +39,8 @@ MAX_HISTORY_MESSAGES = 10
 def prepare_llm_messages(
     state: AgentState,
     external_history: Optional[List[Dict[str, str]]] = None,
-    max_history: int = MAX_HISTORY_MESSAGES
+    max_history: int = MAX_HISTORY_MESSAGES,
+    tool_registry=None
 ) -> List[Dict[str, str]]:
     """
     Prepare message list for LLM API call.
@@ -66,6 +67,8 @@ def prepare_llm_messages(
 
         max_history: Maximum number of historical messages to include (default: 10)
             This limits context window size to prevent token overflow
+        
+        tool_registry: Optional ToolRegistry instance for accessing tool list
 
     Returns:
         List of message dictionaries in OpenAI API format:
@@ -103,7 +106,7 @@ def prepare_llm_messages(
     # ========================================================================
     # Use prompts module to construct optimized system prompt
     # This includes base identity, tools guide, task framework, and context-aware additions
-    system_prompt = build_optimized_system_prompt(state=state)
+    system_prompt = build_optimized_system_prompt(state=state, tool_registry=tool_registry)
     system_message = {
         "role": "system",
         "content": system_prompt

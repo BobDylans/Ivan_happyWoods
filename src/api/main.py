@@ -22,6 +22,7 @@ from .voice_routes import voice_router
 from .conversation_routes import conversation_router
 from .auth_routes import router as auth_router  # 🔧 添加认证路由
 from .session_routes import router as session_management_router  # 🔧 添加会话管理路由 (Phase 3B)
+from .metrics_routes import router as metrics_router  # 📊 添加 Prometheus metrics 路由
 from .models import ErrorResponse
 from .auth import APIKeyMiddleware
 from .middleware import (
@@ -81,10 +82,10 @@ async def lifespan(app: FastAPI):
         tool_registry = ToolRegistry()
         AppState.set_tool_registry(app, tool_registry)
 
-        # 🔧 Pass config to tools for Tavily API integration
+        # 🔧 Pass registry and config to tools for Tavily API integration
         config_dict = config.model_dump() if hasattr(config, 'model_dump') else {}
-        registered_tools = initialize_default_tools(config=config_dict)
-        logger.info(f"Initialized {len(registered_tools)} MCP tools: {', '.join(registered_tools)}")
+        registered_tools = initialize_default_tools(registry=tool_registry, config=config_dict)
+        logger.info(f"✅ Initialized {len(registered_tools)} MCP tools: {', '.join(registered_tools)}")
     except Exception as e:
         logger.warning(f"Could not initialize MCP tools: {e}")
 
@@ -152,6 +153,8 @@ async def lifespan(app: FastAPI):
             config=config,
             observability=observability,
             tool_call_persister=tool_call_persister,
+            db_engine=db_engine if db_engine else None,
+            tool_registry=tool_registry,
         )
         AppState.set_voice_agent(app, agent)
         logger.info("✅ Voice agent initialized successfully")
@@ -375,6 +378,7 @@ app.include_router(conversation_router, prefix="/api/v1")  # 对话服务路由
 app.include_router(rag_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1", tags=["Authentication"])  # 🔧 认证路由 (Phase 3B)
 app.include_router(session_management_router)  # 🔧 会话管理路由 (Phase 3B) - prefix 已在 router 中定义
+app.include_router(metrics_router, prefix="/api/v1", tags=["Monitoring"])  # 📊 Prometheus 监控路由
 
 
 # Root endpoint

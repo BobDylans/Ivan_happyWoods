@@ -9,27 +9,81 @@
 
 ## [未发布]
 
+### 计划中
+- n8n 工作流集成
+- Kubernetes 部署配置
+- CI/CD Pipeline
+
+---
+
+## [0.4.0] - 2025-11-10
+
 ### ✨ 新增
+- 📊 **Prometheus 监控集成** (Phase 3B)
+  - 新增 `PrometheusExporter` 类支持 Counter/Gauge/Histogram 指标
+  - 新增 `GET /api/v1/metrics` 端点导出 Prometheus 格式指标
+  - 新增 `GET /api/v1/health/prometheus` 健康检查端点
+  - 与 Observability 系统无缝集成
+  - 支持 HTTP/LLM/Agent/Database 全链路指标
+  - 详见 [docs/guides/MONITORING_GUIDE.md](docs/guides/MONITORING_GUIDE.md)
+
+- 📈 **Grafana 可视化仪表板** (Phase 3B)
+  - 系统概览仪表板 (`grafana/dashboards/system-overview.json`)
+  - Agent 性能仪表板 (`grafana/dashboards/agent-performance.json`)
+  - LLM 成本分析仪表板 (`grafana/dashboards/llm-cost-analysis.json`)
+  - Docker Compose 一键部署 (`docker-compose.monitoring.yml`)
+  - 自动化配置 (Provisioning)
+  - 详见 [docs/guides/GRAFANA_SETUP_GUIDE.md](docs/guides/GRAFANA_SETUP_GUIDE.md)
+
+- 🧪 **测试体系建设** (Phase 3B)
+  - Observability 模块完整测试（17 个测试用例）
+  - SessionManager 增强测试（12 个测试用例）
+  - 工具持久化解耦测试（10 个测试用例）
+  - 新增 `tests/conftest.py` 解决模块导入问题
+  - 所有测试通过，测试覆盖率显著提升
+
 - 📚 **RAG/Qdrant 集成框架**
   - 新增 RAG 配置模型与环境变量映射
   - `scripts/rag_ingest.py` 支持批量导入 `docs/` 文档
   - `RAGService` 自动将检索结果注入 LLM 提示
+  
 - 🌐 **RAG 文档上传接口**
   - 新增 `POST /api/v1/rag/upload`，支持上传 Markdown/PDF/DOCX 并自动入库
   - `rag.ingestion` 模块抽离导入逻辑，统一脚本与 API 行为并自动清理临时文件
-- 🔍 **健康检查扩展**: `/api/v1/health` 增加 `rag` 组件状态
+  
+- 🔍 **健康检查扩展**: `/api/v1/health` 增加 `rag` 和 `prometheus` 组件状态
 
-### 🧪 测试
-- 新增单元测试 `tests/unit/test_rag_service.py`
+### 🔧 改进
+- **废弃警告修复**:
+  - 修复 `config.settings.get_config()` 废弃警告（使用 `load_config()` 或依赖注入）
+  - 修复 `get_tool_registry()` 废弃警告（使用依赖注入）
+  - 恢复 PostgreSQL Checkpointer 功能（通过 `db_engine` 参数传递）
+- **依赖注入优化**:
+  - `VoiceAgent` 接受 `db_engine` 参数避免全局状态
+  - `initialize_default_tools` 接受 `registry` 参数避免全局注册表
+  - 提升代码可测试性和多实例部署能力
 
 ### 📝 文档
+- 新增 [docs/guides/MONITORING_GUIDE.md](docs/guides/MONITORING_GUIDE.md) - Prometheus 完整指南
+- 新增 [docs/guides/GRAFANA_SETUP_GUIDE.md](docs/guides/GRAFANA_SETUP_GUIDE.md) - Grafana 部署和使用指南
+- 新增 [docs/achievements/TEST_PHASE_COMPLETION_2025-11-10.md](docs/achievements/TEST_PHASE_COMPLETION_2025-11-10.md)
+- 新增 [docs/achievements/PROMETHEUS_INTEGRATION_2025-11-10.md](docs/achievements/PROMETHEUS_INTEGRATION_2025-11-10.md)
 - 新增指南 [docs/RAG_SETUP.md](docs/RAG_SETUP.md)
+- 新增 `docker-compose.monitoring.yml` - 监控栈一键部署
+- 新增 `prometheus.yml` - Prometheus 配置
+- 新增 `start-monitoring.sh` / `start-monitoring.bat` - 启动脚本
+- 更新 PROJECT.md (版本 0.4.0, Phase 3B 完成)
+- 更新 CHANGELOG.md (本文件)
 
-### 计划中
-- RAG 知识库集成
-- n8n 工作流集成
-- Docker 容器化
-- 监控和指标系统
+### 🧪 测试
+- 新增单元测试 `tests/unit/test_observability.py` (17 个测试)
+- 新增单元测试 `tests/unit/test_session_manager_enhanced.py` (12 个测试)
+- 新增单元测试 `tests/unit/test_tool_persistence.py` (10 个测试)
+- 新增单元测试 `tests/unit/test_rag_service.py`
+- 所有测试用例通过 ✅
+
+### 📦 依赖
+- 新增 `prometheus-client>=0.19.0,<1.0.0` - Prometheus 指标导出
 
 ---
 

@@ -7,7 +7,7 @@ Initialize and register default tools for the agent system.
 import logging
 from typing import List, Optional, Dict, Any
 
-from .registry import get_tool_registry
+from .registry import ToolRegistry
 from .tools import (
     CalculatorTool,
     TimeTool,
@@ -19,11 +19,15 @@ from .voice_tools import create_voice_tools
 logger = logging.getLogger(__name__)
 
 
-def initialize_default_tools(config: Optional[Dict[str, Any]] = None) -> List[str]:
+def initialize_default_tools(
+    registry: ToolRegistry = None,
+    config: Optional[Dict[str, Any]] = None
+) -> List[str]:
     """
     Initialize and register all default MCP tools.
     
     Args:
+        registry: ToolRegistry instance (required, no longer uses global state)
         config: Configuration dictionary (optional)
     
     Returns:
@@ -31,7 +35,8 @@ def initialize_default_tools(config: Optional[Dict[str, Any]] = None) -> List[st
     """
     import os
     
-    registry = get_tool_registry()
+    if registry is None:
+        raise ValueError("ToolRegistry must be provided. Global registry is deprecated.")
     
     # Get search tool config from multiple sources
     search_tool_config = {}
@@ -88,23 +93,27 @@ def initialize_default_tools(config: Optional[Dict[str, Any]] = None) -> List[st
     return registered_names
 
 
-def get_available_tool_schemas():
+def get_available_tool_schemas(registry: ToolRegistry):
     """
     Get OpenAI-compatible schemas for all registered tools.
+    
+    Args:
+        registry: ToolRegistry instance
     
     Returns:
         List of tool schemas in OpenAI function calling format
     """
-    registry = get_tool_registry()
     return registry.get_schemas()
 
 
-def list_available_tools() -> List[str]:
+def list_available_tools(registry: ToolRegistry) -> List[str]:
     """
     Get list of all available tool names.
+    
+    Args:
+        registry: ToolRegistry instance
     
     Returns:
         List of tool names
     """
-    registry = get_tool_registry()
     return registry.list_tool_names()

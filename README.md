@@ -16,23 +16,33 @@
 git clone <repository-url>
 cd Ivan_happyWoods
 
-# 2. 安装依赖
+# 2. 进入虚拟环境 ⭐ 重要
+# Windows:
+venv\Scripts\activate
+
+# Linux/macOS:
+source venv/bin/activate
+
+# 3. 安装依赖（虚拟环境中已配置）
+# 如需更新依赖，请运行:
 pip install -r requirements.txt
 
-# 3. 配置环境变量
+# 4. 配置环境变量
 cp .env.example .env
 # 编辑 .env 文件，填写必需的 API Keys:
 # - VOICE_AGENT_LLM__API_KEY (OpenAI 或兼容 API)
 # - IFLYTEK_APPID, IFLYTEK_APIKEY, IFLYTEK_APISECRET (科大讯飞)
 # 如需启用 RAG，请追加 VOICE_AGENT_RAG__* 相关配置（参阅 docs/RAG_SETUP.md）
 
-# 4. 启动服务
+# 5. 启动服务
 python start_server.py
 
-# 5. 测试
+# 6. 测试
 # 浏览器访问: http://localhost:8000/docs (API 文档)
 # 或打开: demo/chat_demo.html (聊天界面)
 ```
+
+> ⚠️ **必须进入虚拟环境！** 虚拟环境 (`venv/`) 中已预装所有依赖。请始终在激活的虚拟环境中运行项目。
 
 ---
 
@@ -53,6 +63,7 @@ python start_server.py
 ## 📚 文档
 
 - **[PROJECT.md](PROJECT.md)** - 完整项目架构和技术栈 ⭐
+- **[AGENTS.md](AGENTS.md)** - 贡献者指南，涵盖结构、流程与规范
 - **[CHANGELOG.md](CHANGELOG.md)** - 版本变更历史
 - **[docs/](docs/)** - 详细技术文档和指南
 - **[docs/RAG_SETUP.md](docs/RAG_SETUP.md)** - Qdrant RAG 部署与导入指南

@@ -144,7 +144,7 @@ class LLMCaller(AgentNodesBase):
             # ================================================================
             # Step 2: Prepare message list (system prompt + history)
             # ================================================================
-            messages = prepare_llm_messages(state, external_history=external_history)
+            messages = prepare_llm_messages(state, external_history=external_history, tool_registry=self.tool_registry)
 
             # ================================================================
             # Step 3: Inject RAG context (if available)
@@ -568,21 +568,15 @@ class LLMCaller(AgentNodesBase):
             }
         """
         try:
-            # Try to get registry from global state (workaround)
-            # Ideally registry should be passed during init
-            try:
-                from mcp.registry import _GLOBAL_REGISTRY
-                if _GLOBAL_REGISTRY is None:
-                    self.logger.warning("Tool registry not initialized, tools disabled for this request")
-                    return []
-                registry = _GLOBAL_REGISTRY
-            except Exception:
-                self.logger.warning("Could not access tool registry, tools disabled for this request")
+            # Use the tool_registry passed during initialization
+            if self.tool_registry is None:
+                self.logger.warning("Tool registry not provided, tools disabled for this request")
                 return []
             
-            tools = registry.list_tools()
+            tools = self.tool_registry.list_tools()
 
             if not tools:
+                self.logger.info("No tools available in registry")
                 return []
 
             # Convert to OpenAI Function Calling format

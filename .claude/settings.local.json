@@ -12,7 +12,19 @@
       "Bash(netstat:*)",
       "Bash(findstr:*)",
       "Bash(taskkill //F //PID 24000)",
-      "mcp__context7__resolve-library-id"
+      "mcp__context7__resolve-library-id",
+      "Bash(python start_server.py:*)",
+      "Bash(venvScriptspython.exe start_server.py)",
+      "Bash(.\\venv\\Scripts\\python.exe:*)",
+      "Bash(venv/Scripts/python.exe:*)",
+      "Bash(tree /L 2 /F D:ProjectsivanHappyWoodsbackEnd 2)",
+      "Bash(nul)",
+      "Bash(pip install:*)",
+      "Bash(.venvScriptspython.exe start_server.py)",
+      "Bash(cmd /c \"venv\\Scripts\\activate && python start_server.py\")",
+      "Bash(\"./venv/Scripts/python.exe\" start_server.py)",
+      "Bash(cat:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

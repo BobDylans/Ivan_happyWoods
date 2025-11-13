@@ -1,0 +1,290 @@
+{
+  "dashboard": {
+    "title": "Voice Agent - Agent 性能分析",
+    "tags": ["voice-agent", "agent", "performance"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 1,
+    "refresh": "10s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "节点执行频率",
+        "type": "graph",
+        "gridPos": {
+          "x": 0,
+          "y": 0,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(voice_agent_agent_node_execution_count_total[1m]) by (node)",
+            "legendFormat": "{{node}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ops",
+            "label": "执行次数/秒"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "总节点执行次数",
+        "type": "singlestat",
+        "gridPos": {
+          "x": 12,
+          "y": 0,
+          "w": 6,
+          "h": 4
+        },
+        "targets": [
+          {
+            "expr": "sum(voice_agent_agent_node_execution_count_total)",
+            "refId": "A"
+          }
+        ],
+        "format": "none",
+        "valueName": "current"
+      },
+      {
+        "id": 3,
+        "title": "工具调用成功率",
+        "type": "singlestat",
+        "gridPos": {
+          "x": 18,
+          "y": 0,
+          "w": 6,
+          "h": 4
+        },
+        "targets": [
+          {
+            "expr": "sum(rate(voice_agent_agent_tool_call_count_total{status=\"success\"}[5m])) / sum(rate(voice_agent_agent_tool_call_count_total[5m])) * 100",
+            "refId": "A"
+          }
+        ],
+        "format": "percent",
+        "valueName": "current",
+        "thresholds": "90,95",
+        "colors": ["#d44a3a", "#e0b400", "#299c46"]
+      },
+      {
+        "id": 4,
+        "title": "节点平均执行时间",
+        "type": "graph",
+        "gridPos": {
+          "x": 0,
+          "y": 8,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "avg(voice_agent_agent_node_execution_time_ms) by (node)",
+            "legendFormat": "{{node}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ms",
+            "label": "执行时间"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "最慢节点 (Top 5)",
+        "type": "table",
+        "gridPos": {
+          "x": 12,
+          "y": 4,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "topk(5, avg(voice_agent_agent_node_execution_time_ms) by (node))",
+            "format": "table",
+            "instant": true,
+            "refId": "A"
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "Time": true
+              },
+              "renameByName": {
+                "node": "节点",
+                "Value": "平均时间 (ms)"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "工具调用频率",
+        "type": "graph",
+        "gridPos": {
+          "x": 0,
+          "y": 16,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(voice_agent_agent_tool_call_count_total[1m]) by (tool)",
+            "legendFormat": "{{tool}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ops",
+            "label": "调用次数/秒"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "工具调用分布",
+        "type": "piechart",
+        "gridPos": {
+          "x": 12,
+          "y": 12,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "sum by (tool) (rate(voice_agent_agent_tool_call_count_total[5m]))",
+            "legendFormat": "{{tool}}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "工具执行时间对比",
+        "type": "bargauge",
+        "gridPos": {
+          "x": 0,
+          "y": 24,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "avg(voice_agent_agent_node_execution_time_ms{node=~\".*tool.*\"}) by (node)",
+            "legendFormat": "{{node}}",
+            "refId": "A"
+          }
+        ],
+        "orientation": "horizontal",
+        "thresholds": [
+          {
+            "color": "green",
+            "value": null
+          },
+          {
+            "color": "yellow",
+            "value": 500
+          },
+          {
+            "color": "red",
+            "value": 1000
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Agent 工作流完整性",
+        "type": "graph",
+        "gridPos": {
+          "x": 12,
+          "y": 20,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(voice_agent_agent_node_execution_count_total{node=\"input_processor\"}[5m])",
+            "legendFormat": "输入处理",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(voice_agent_agent_node_execution_count_total{node=\"call_llm\"}[5m])",
+            "legendFormat": "LLM 调用",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(voice_agent_agent_node_execution_count_total{node=\"format_response\"}[5m])",
+            "legendFormat": "响应格式化",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ops",
+            "label": "执行次数/秒"
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "工具调用错误趋势",
+        "type": "graph",
+        "gridPos": {
+          "x": 0,
+          "y": 32,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(voice_agent_agent_tool_call_count_total{status=\"error\"}[1m]) by (tool)",
+            "legendFormat": "{{tool}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ops",
+            "label": "错误次数/秒"
+          }
+        ]
+      },
+      {
+        "id": 11,
+        "title": "节点执行热力图",
+        "type": "heatmap",
+        "gridPos": {
+          "x": 12,
+          "y": 28,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "sum(increase(voice_agent_agent_node_execution_count_total[1m])) by (node)",
+            "format": "time_series",
+            "refId": "A"
+          }
+        ],
+        "dataFormat": "timeseries"
+      }
+    ]
+  }
+}
+

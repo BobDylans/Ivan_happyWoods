@@ -27,23 +27,6 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
-# Tool Name Mapping (LLM → MCP)
-# ============================================================================
-
-# Map common LLM tool names to MCP tool registry names
-# This handles differences in tool naming conventions between LLMs
-TOOL_NAME_MAPPING = {
-    "search_tool": "web_search",
-    "web_search": "web_search",
-    "calculator": "calculator",
-    "time_tool": "get_time",
-    "get_time": "get_time",
-    "weather": "get_weather",
-    "get_weather": "get_weather",
-}
-
-
-# ============================================================================
 # Tool Handler Class
 # ============================================================================
 
@@ -89,8 +72,9 @@ class ToolHandler(AgentNodesBase):
         *,
         observability=None,
         tool_call_persister: Optional[Callable[..., Any]] = None,
+        tool_registry=None,
     ):
-        super().__init__(config, trace=trace, observability=observability)
+        super().__init__(config, trace=trace, observability=observability, tool_registry=tool_registry)
         self._tool_call_persister: Optional[Callable[..., Any]] = tool_call_persister
 
     def set_tool_call_persister(self, persister: Optional[Callable[..., Any]]) -> None:
@@ -267,149 +251,6 @@ class ToolHandler(AgentNodesBase):
             return state
 
     # ========================================================================
-    # Tool Execution
-    # ========================================================================
-
-    async def _execute_tool_call(self, tool_call: ToolCall) -> ToolResult:
-        """
-        Execute a tool call using MCP tool registry.
-
-        This method attempts to execute the tool call through MCP registry.
-        If MCP is not available or tool execution fails, it falls back to
-        placeholder implementations for common tools.
-
-        Args:
-            tool_call: ToolCall object containing:
-                - id: Unique tool call identifier
-                - name: Tool name (may need mapping to MCP name)
-                - arguments: Tool arguments dictionary
-
-        Returns:
-            ToolResult object containing:
-                - call_id: Same as tool_call.id
-                - success: True if execution succeeded
-                - result: Tool output (JSON string or None)
-                - error: Error message if failed
-
-        Execution Flow:
-            1. Try MCP tool registry (primary path)
-            2. Map LLM tool name to MCP tool name
-            3. Execute through registry
-            4. Convert MCP result to agent ToolResult
-            5. If MCP unavailable, use fallback placeholders
-
-        Example:
-            >>> tool_call = ToolCall(
-            ...     id="call_123",
-            ...     name="calculator",
-            ...     arguments={"expression": "2+2"}
-            ... )
-            >>> result = await handler._execute_tool_call(tool_call)
-            >>> result.success
-            True
-            >>> result.result
-            '{"value": 4}'
-        """
-        try:
-            # ================================================================
-            # Primary Path: MCP Tool Registry
-            # ================================================================
-            try:
-                from mcp import get_tool_registry
-
-                registry = get_tool_registry()
-
-                # Map LLM tool name to MCP tool name
-                mcp_tool_name = TOOL_NAME_MAPPING.get(
-                    tool_call.name,
-                    tool_call.name  # Use original name if no mapping
-                )
-
-                self.logger.debug(
-                    f"🔧 Executing tool via MCP: {tool_call.name} → {mcp_tool_name}"
-                )
-
-                # Execute through registry
-                result_dict = await registry.execute(
-                    mcp_tool_name,
-                    **tool_call.arguments
-                )
-
-                # Convert MCP ToolResult to Agent ToolResult
-                if result_dict.get("success"):
-                    result_str = json.dumps(
-                        result_dict.get("data", {}),
-                        ensure_ascii=False
-                    )
-                else:
-                    result_str = None
-
-                return ToolResult(
-                    call_id=tool_call.id,
-                    success=result_dict.get("success", False),
-                    result=result_str,
-                    error=result_dict.get("error")
-                )
-
-            except ImportError:
-                self.logger.warning(
-                    "MCP tools not available, using fallback implementation"
-                )
-                # Fall through to fallback implementation
-                pass
-
-            # ================================================================
-            # Fallback Path: Placeholder Implementations
-            # ================================================================
-            self.logger.debug(f"🔧 Executing tool via fallback: {tool_call.name}")
-
-            if tool_call.name in ["search_tool", "web_search"]:
-                query = tool_call.arguments.get('query', 'unknown')
-                result = f"Search results for: {query} (fallback placeholder)"
-
-            elif tool_call.name == "calculator":
-                expression = tool_call.arguments.get('expression', '')
-                try:
-                    # Simple eval for basic math (UNSAFE for production!)
-                    # In production, use a proper math parser
-                    result = f"The result is: {expression} (calculation placeholder)"
-                except Exception as calc_error:
-                    result = f"Could not calculate: {calc_error}"
-
-            elif tool_call.name in ["time_tool", "get_time"]:
-                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                result = f"Current time: {current_time}"
-
-            else:
-                # Generic placeholder
-                result = (
-                    f"Tool '{tool_call.name}' executed with "
-                    f"arguments: {tool_call.arguments} (placeholder)"
-                )
-
-            return ToolResult(
-                call_id=tool_call.id,
-                success=True,
-                result=result
-            )
-
-        except Exception as e:
-            # ================================================================
-            # Error Handling
-            # ================================================================
-            self.logger.error(
-                f"Tool execution error for '{tool_call.name}': {e}",
-                exc_info=True
-            )
-
-            return ToolResult(
-                call_id=tool_call.id,
-                success=False,
-                result=None,
-                error=str(e)
-            )
-
-    # ========================================================================
     # Database Persistence
     # ========================================================================
 
@@ -516,5 +357,4 @@ async def handle_tools(state: AgentState, config=None, trace=None) -> AgentState
 __all__ = [
     "ToolHandler",
     "handle_tools",  # Convenience function
-    "TOOL_NAME_MAPPING",  # For testing/documentation
 ]
