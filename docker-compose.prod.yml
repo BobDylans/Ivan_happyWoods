@@ -1,0 +1,235 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database - Production Configuration
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: voice_agent_postgres_prod
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-voice_agent}
+      POSTGRES_USER: ${POSTGRES_USER:-agent_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}  # Required - set in .env
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent_user} -d ${POSTGRES_DB:-voice_agent}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - voice_agent_prod_network
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+  # Qdrant Vector Database - Production Configuration
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: voice_agent_qdrant_prod
+    ports:
+      - "${QDRANT_REST_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_prod_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: ${QDRANT_GRPC_PORT:-6334}
+      QDRANT__STORAGE__STORAGE_PATH: /qdrant/storage
+      QDRANT__STORAGE__SNAPSHOTS_PATH: /qdrant/snapshots
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - voice_agent_prod_network
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+  # Jaeger All-In-One - Distributed Tracing (P0 Phase)
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: voice_agent_jaeger_prod
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: ":9411"
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      # Jaeger UI
+      - "${JAEGER_UI_PORT:-16686}:16686"
+      # Jaeger Agent ports
+      - "${JAEGER_AGENT_ZIPKIN_THRIFT_PORT:-6831}:6831/udp"
+      - "${JAEGER_AGENT_COMPACT_PORT:-6832}:6832/udp"
+      - "${JAEGER_AGENT_SERVE_CONFIGS_PORT:-5778}:5778"
+      # Jaeger Collector ports
+      - "${JAEGER_COLLECTOR_PORT:-14250}:14250"
+      - "${JAEGER_COLLECTOR_HTTP_PORT:-14268}:14268"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:16686"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - voice_agent_prod_network
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+  # Prometheus - Metrics Collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: voice_agent_prometheus_prod
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_prod_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - voice_agent_prod_network
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+  # Grafana - Metrics Visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: voice_agent_grafana_prod
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}  # Required - set in .env
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    volumes:
+      - grafana_prod_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - voice_agent_prod_network
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+  # Voice Agent API Service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: voice_agent_api_prod
+    environment:
+      # Application Settings
+      ENVIRONMENT: production
+      DEBUG: "false"
+
+      # API Configuration
+      API_HOST: "0.0.0.0"
+      API_PORT: 8000
+      API_WORKERS: 4
+
+      # Database Configuration
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-voice_agent}
+      POSTGRES_USER: ${POSTGRES_USER:-agent_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}  # Required - set in .env
+
+      # Qdrant Configuration
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+
+      # LLM Configuration
+      VOICE_AGENT_LLM__PROVIDER: ${LLM_PROVIDER:-openai}
+      VOICE_AGENT_LLM__API_KEY: ${LLM_API_KEY}  # Required - set in .env
+      VOICE_AGENT_LLM__BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      VOICE_AGENT_LLM__DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-gpt-4}
+
+      # Tools Configuration
+      TAVILY_API_KEY: ${TAVILY_API_KEY}  # Required for search tool - set in .env
+
+      # Tracing Configuration (P0 Phase)
+      JAEGER_HOST: jaeger
+      JAEGER_PORT: 6831
+      SERVICE_NAME: voice-agent-api
+      ENVIRONMENT: production
+      TRACE_SAMPLE_RATE: ${TRACE_SAMPLE_RATE:-0.5}  # 50% sampling in production
+
+      # Logging Configuration
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+
+      # Security Configuration
+      API_KEYS: ${API_KEYS}  # Comma-separated list - required - set in .env
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://yourdomain.com}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      jaeger:
+        condition: service_healthy
+    volumes:
+      - ./logs:/var/log/voice-agent
+    networks:
+      - voice_agent_prod_network
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      start-period: 40s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+volumes:
+  postgres_prod_data:
+    driver: local
+  qdrant_prod_data:
+    driver: local
+  prometheus_prod_data:
+    driver: local
+  grafana_prod_data:
+    driver: local
+
+networks:
+  voice_agent_prod_network:
+    driver: bridge
